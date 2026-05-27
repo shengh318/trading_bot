@@ -37,14 +37,12 @@ trader/
 ## Setup
 
 ```bash
-# Activate virtual environment
+# Create and activate virtual environment
+python3 -m venv .venv
 source .venv/bin/activate
 
 # Install backend dependencies
 pip install -r backend/requirements.txt
-
-# Install frontend dependencies
-cd frontend && npm install
 ```
 
 ### Configuration
@@ -65,6 +63,12 @@ Get free paper trading keys at [alpaca.markets](https://alpaca.markets).
 
 # Frontend (separate terminal)
 cd frontend && npm run dev
+```
+
+## Running Tests
+
+```bash
+.venv/bin/python -m pytest backend/tests/ -v
 ```
 
 ## Build Progress
