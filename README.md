@@ -20,14 +20,22 @@ Backend (FastAPI + Python)                        ──►  API layer + trading
 ```
 trader/
 ├── backend/
-│   ├── api/              FastAPI routes & WebSocket
+│   ├── api/              FastAPI routes, WebSocket, models, deps
+│   │   ├── main.py       FastAPI app entry + lifespan
+│   │   ├── routes.py     REST endpoints (portfolio, positions, orders, backtest)
+│   │   ├── websocket.py  WebSocket handler (live backtest streaming)
+│   │   ├── models.py     Pydantic response models
+│   │   └── deps.py       Shared DB dependency
 │   ├── engine/           Live/paper trading loop
 │   ├── strategies/       Strategy base class + implementations
+│   │   ├── base.py       Abstract Strategy + Signal + Portfolio
+│   │   ├── registry.py   Strategy registry (discovery + instantiation)
+│   │   └── sma_crossover.py
 │   ├── backtest/         Custom backtest engine + metrics
 │   │   ├── engine.py     Bar-by-bar simulation
 │   │   └── metrics.py    Sharpe, drawdown, win rate, etc.
 │   ├── data/             Alpaca data loader & SQLite store
-│   ├── tests/            Pytest test suite
+│   ├── tests/            71 pytest tests covering all modules
 │   └── config.py         Settings & env vars
 ├── frontend/
 │   └── src/
@@ -68,17 +76,19 @@ Get free paper trading keys at [alpaca.markets](https://alpaca.markets).
 cd frontend && npm run dev
 ```
 
-## Running Tests
+## Testing
+
+All tests use `pytest` with isolated databases per test via the `api_db` fixture.
 
 ```bash
-.venv/bin/python -m pytest backend/tests/ -v
+.venv/bin/python -m pytest backend/tests/ -v --tb=short
 ```
 
 ## Build Progress
 
 - [x] Phase 1: Foundation — SQLite schema, Alpaca data loader, config
-- [x] Phase 2: Custom Backtest Engine — bar-by-bar simulation, P&L tracking, equity curves, Sharpe/max DD/win rate/profit factor
-- [ ] Phase 3: Backend API + WebSocket
+- [x] Phase 2: Custom Backtest Engine — bar-by-bar simulation, P&L tracking, equity curves, metrics
+- [x] Phase 3: Backend API + WebSocket — REST endpoints for portfolio/positions/orders/backtest, WebSocket for real-time backtest streaming, strategy registry
 - [ ] Phase 4: React Frontend Dashboard
 - [ ] Phase 5: Live Trading Engine
 - [ ] Phase 6: Strategy building & tuning

@@ -3,19 +3,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api import deps
+from backend.api.routes import router
+from backend.api.websocket import ws_router
 from backend.config import validate_config
 from backend.data.store import Database
 
 
-db: Database | None = None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db
-    db = Database()
+    deps.db = Database()
     yield
-    db.close()
+    deps.db.close()
 
 
 app = FastAPI(title="TraderBot", lifespan=lifespan)
@@ -26,6 +25,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(router)
+app.include_router(ws_router)
 
 
 @app.get("/api/health")
