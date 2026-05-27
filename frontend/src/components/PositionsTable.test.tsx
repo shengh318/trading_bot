@@ -1,21 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { ThemeProvider } from "../theme/ThemeContext";
 import PositionsTable from "./PositionsTable";
 
 describe("PositionsTable", () => {
   it("shows empty state", () => {
-    render(<PositionsTable positions={[]} />);
+    render(<ThemeProvider><PositionsTable positions={[]} /></ThemeProvider>);
     expect(screen.getByText("No holdings")).toBeDefined();
   });
 
   it("renders position rows", () => {
     render(
-      <PositionsTable
+      <ThemeProvider><PositionsTable
         positions={[
           { symbol: "AAPL", qty: 10, avg_entry_price: 150, current_price: 155, unrealized_pl: 50, market_value: 1550 },
           { symbol: "GOOG", qty: 5, avg_entry_price: 2800, current_price: 2750, unrealized_pl: -250, market_value: 13750 },
         ]}
-      />,
+      /></ThemeProvider>,
     );
     expect(screen.getByText("AAPL")).toBeDefined();
     expect(screen.getByText("GOOG")).toBeDefined();
@@ -25,12 +26,12 @@ describe("PositionsTable", () => {
 
   it("colors positive P&L green and negative red", () => {
     render(
-      <PositionsTable
+      <ThemeProvider><PositionsTable
         positions={[
           { symbol: "AAPL", qty: 10, avg_entry_price: 150, current_price: 155, unrealized_pl: 50, market_value: 1550 },
           { symbol: "GOOG", qty: 5, avg_entry_price: 2800, current_price: 2750, unrealized_pl: -250, market_value: 13750 },
         ]}
-      />,
+      /></ThemeProvider>,
     );
     const greenPnl = screen.getByText("$50.00");
     const redPnl = screen.getByText("$-250.00");

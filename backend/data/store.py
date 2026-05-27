@@ -16,6 +16,12 @@ class Database:
         self._create_tables()
 
     def _create_tables(self) -> None:
+        # migrate: add profit_factor column if missing (SQLite cannot use IF NOT EXISTS for ALTER)
+        try:
+            self.conn.execute("ALTER TABLE backtest_runs ADD COLUMN profit_factor REAL")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS portfolio_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,6 +68,7 @@ class Database:
                 max_drawdown REAL,
                 win_rate REAL,
                 num_trades INTEGER,
+                profit_factor REAL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
@@ -149,13 +156,14 @@ class Database:
         cur = self.conn.execute(
             """INSERT INTO backtest_runs
                (strategy_name, parameters, symbol, start_date, end_date, initial_cash,
-                final_equity, total_return, sharpe_ratio, max_drawdown, win_rate, num_trades)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                final_equity, total_return, sharpe_ratio, max_drawdown, win_rate, num_trades, profit_factor)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (run["strategy_name"], run.get("parameters"), run["symbol"],
              run["start_date"], run["end_date"], run["initial_cash"],
              run.get("final_equity"), run.get("total_return"),
              run.get("sharpe_ratio"), run.get("max_drawdown"),
-             run.get("win_rate"), run.get("num_trades")),
+             run.get("win_rate"), run.get("num_trades"),
+             run.get("profit_factor")),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -165,6 +173,12 @@ class Database:
             "SELECT * FROM backtest_runs ORDER BY created_at DESC LIMIT ?", (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_backtest_run_by_id(self, run_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM backtest_runs WHERE id = ?", (run_id,),
+        ).fetchone()
+        return dict(row) if row else None
 
     def delete_backtest_runs(self) -> None:
         self.conn.execute("DELETE FROM backtest_trades")

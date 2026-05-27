@@ -23,6 +23,7 @@ class BacktestEngine:
         strategy: Strategy,
         symbol: str = "ASSET",
         initial_cash: float = 10000.0,
+        dividends: pd.DataFrame | None = None,
     ):
         required = {"open", "high", "low", "close", "volume"}
         missing = required - set(data.columns)
@@ -35,6 +36,27 @@ class BacktestEngine:
         self.initial_cash = initial_cash
         self.portfolio = Portfolio(initial_cash)
 
+        if dividends is not None and not dividends.empty:
+            if "dividend" not in dividends.columns:
+                raise ValueError("dividends DataFrame must have a 'dividend' column")
+            self._dividends = dividends
+        else:
+            self._dividends = pd.DataFrame()
+
+    def _apply_dividend(self, timestamp: str) -> float:
+        if self._dividends.empty:
+            return 0.0
+        ts = pd.to_datetime(timestamp)
+        match = self._dividends[self._dividends.index == ts]
+        if match.empty:
+            return 0.0
+        shares = self.portfolio.positions.get(self.symbol, 0)
+        if shares <= 0:
+            return 0.0
+        amount = float(match.iloc[0]["dividend"]) * shares
+        self.portfolio.cash += amount
+        return round(amount, 2)
+
     def run(self) -> BacktestResult:
         trades: list[dict] = []
         snapshots: list[dict] = []
@@ -45,6 +67,8 @@ class BacktestEngine:
             row = self.data.iloc[i]
             timestamp = row.name if isinstance(row.name, str) else str(row.name)
             price = float(row["close"])
+
+            self._apply_dividend(timestamp)
 
             signal = self.strategy.next(i, self.data, self.portfolio)
 
@@ -124,6 +148,15 @@ class BacktestEngine:
             timestamp = row.name if isinstance(row.name, str) else str(row.name)
             price = float(row["close"])
 
+            dividend_amount = self._apply_dividend(timestamp)
+            event_dividend = None
+            if dividend_amount > 0:
+                event_dividend = {
+                    "bar_index": i,
+                    "timestamp": timestamp,
+                    "dividend": dividend_amount,
+                }
+
             signal = self.strategy.next(i, self.data, self.portfolio)
             event_trade = None
 
@@ -182,4 +215,4 @@ class BacktestEngine:
                 "cash": round(self.portfolio.cash, 2),
             }
 
-            yield {"snapshot": snapshot, "trade": event_trade, "signal": signal}
+            yield {"snapshot": snapshot, "trade": event_trade, "signal": signal, "dividend": event_dividend}

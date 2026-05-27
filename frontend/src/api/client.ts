@@ -92,6 +92,12 @@ export interface Snapshot {
   cash: number;
 }
 
+export interface DividendEvent {
+  bar_index: number;
+  timestamp: string;
+  dividend: number;
+}
+
 export interface WsBarEvent {
   type: "bar";
   bar_index: number;
@@ -100,12 +106,13 @@ export interface WsBarEvent {
   cash: number;
   signal: string;
   trade: Trade | null;
+  dividend?: DividendEvent;
 }
 
 export interface WsCompleteEvent {
   type: "complete";
   run_id: number;
-  metrics?: BacktestRun;
+  metrics?: BacktestMetrics;
 }
 
 export interface WsErrorEvent {

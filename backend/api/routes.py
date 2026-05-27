@@ -11,6 +11,7 @@ from backend.api.models import (
     OrderResponse,
     PositionResponse,
     StrategyInfo,
+    db_row_to_backtest_run_response,
 )
 from backend.backtest.engine import BacktestEngine
 from backend.data.loader import DataLoader
@@ -59,17 +60,17 @@ def get_orders(limit: int = 100):
 @router.get("/api/backtest/runs", response_model=list[BacktestRunResponse])
 def get_backtest_runs(limit: int = 20):
     db = get_db()
-    return db.get_backtest_runs(limit=limit)
+    rows = db.get_backtest_runs(limit=limit)
+    return [db_row_to_backtest_run_response(r) for r in rows]
 
 
 @router.get("/api/backtest/runs/{run_id}", response_model=BacktestRunResponse)
 def get_backtest_run(run_id: int):
     db = get_db()
-    runs = db.get_backtest_runs(limit=1)
-    match = [r for r in runs if r["id"] == run_id]
-    if not match:
+    row = db.get_backtest_run_by_id(run_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Backtest run not found")
-    return match[0]
+    return db_row_to_backtest_run_response(row)
 
 
 @router.get("/api/backtest/runs/{run_id}/trades")
@@ -102,17 +103,23 @@ def run_backtest(req: BacktestRunRequest):
 
     try:
         loader = DataLoader()
+        start = datetime.fromisoformat(req.start_date)
         end = datetime.fromisoformat(req.end_date) if req.end_date else (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1))
         df = loader.load_bars(
             symbol=req.symbol,
-            start=datetime.fromisoformat(req.start_date),
+            start=start,
+            end=end,
+        )
+        div_df = loader.load_dividends(
+            symbol=req.symbol,
+            start=start,
             end=end,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to load data: {e}")
 
     engine = BacktestEngine(
-        df, strategy, symbol=req.symbol, initial_cash=req.initial_cash
+        df, strategy, symbol=req.symbol, initial_cash=req.initial_cash, dividends=div_df,
     )
     result = engine.run()
 
@@ -130,6 +137,7 @@ def run_backtest(req: BacktestRunRequest):
         "max_drawdown": metrics["max_drawdown_pct"],
         "win_rate": metrics["win_rate_pct"],
         "num_trades": metrics["num_trades"],
+        "profit_factor": metrics["profit_factor"],
     })
 
     if not result.trades.empty:
@@ -137,6 +145,6 @@ def run_backtest(req: BacktestRunRequest):
     if not result.equity_curve.empty:
         db.save_backtest_snapshots(run_id, result.equity_curve.to_dict("records"))
 
-    runs = db.get_backtest_runs(limit=1)
-    match = [r for r in runs if r["id"] == run_id]
-    return match[0]
+    rows = db.get_backtest_runs(limit=1)
+    match = [r for r in rows if r["id"] == run_id]
+    return db_row_to_backtest_run_response(match[0])

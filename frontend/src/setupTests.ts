@@ -8,6 +8,7 @@ vi.mock("lightweight-charts", () => {
   const mockChart = {
     addAreaSeries: vi.fn(() => mockSeries),
     addLineSeries: vi.fn(() => mockSeries),
+    addBaselineSeries: vi.fn(() => mockSeries),
     applyOptions: vi.fn(),
     remove: vi.fn(),
     timeScale: vi.fn(() => ({

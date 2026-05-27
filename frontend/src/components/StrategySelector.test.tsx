@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { ThemeProvider } from "../theme/ThemeContext";
 import StrategySelector from "./StrategySelector";
 
 const strategies = [
@@ -19,8 +20,10 @@ const strategies = [
 ];
 
 describe("StrategySelector", () => {
+  const renderWithTheme = (ui: React.ReactElement) => render(<ThemeProvider>{ui}</ThemeProvider>);
+
   it("renders strategy options", () => {
-    render(
+    renderWithTheme(
       <StrategySelector
         strategies={strategies}
         selected="SmaCrossover"
@@ -34,7 +37,7 @@ describe("StrategySelector", () => {
   });
 
   it("shows description for selected strategy", () => {
-    render(
+    renderWithTheme(
       <StrategySelector
         strategies={strategies}
         selected="SmaCrossover"
@@ -47,7 +50,7 @@ describe("StrategySelector", () => {
   });
 
   it("renders parameter inputs", () => {
-    render(
+    renderWithTheme(
       <StrategySelector
         strategies={strategies}
         selected="SmaCrossover"
@@ -62,7 +65,7 @@ describe("StrategySelector", () => {
 
   it("calls onSelect when strategy changes", () => {
     const onSelect = vi.fn();
-    render(
+    renderWithTheme(
       <StrategySelector
         strategies={strategies}
         selected="SmaCrossover"
@@ -77,7 +80,7 @@ describe("StrategySelector", () => {
 
   it("calls onParamChange when parameter input changes", () => {
     const onParamChange = vi.fn();
-    render(
+    renderWithTheme(
       <StrategySelector
         strategies={strategies}
         selected="SmaCrossover"

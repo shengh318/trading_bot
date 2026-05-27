@@ -1,10 +1,12 @@
 import json
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.api.deps import get_db
 from backend.backtest.engine import BacktestEngine
+from backend.backtest.metrics import calculate_metrics
 from backend.data.loader import DataLoader
 from backend.strategies.registry import get_strategy
 
@@ -43,9 +45,15 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
 
     loader = DataLoader()
     end = datetime.fromisoformat(data["end_date"]) if data.get("end_date") else (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1))
+    start = datetime.fromisoformat(data["start_date"])
     df = loader.load_bars(
         symbol=data["symbol"],
-        start=datetime.fromisoformat(data["start_date"]),
+        start=start,
+        end=end,
+    )
+    div_df = loader.load_dividends(
+        symbol=data["symbol"],
+        start=start,
         end=end,
     )
 
@@ -53,13 +61,14 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
         df, strategy,
         symbol=data["symbol"],
         initial_cash=float(data.get("initial_cash", 10000)),
+        dividends=div_df,
     )
 
     trades_batch: list[dict] = []
     snapshots_batch: list[dict] = []
 
     for event in engine.stream():
-        msg = {
+        msg: dict = {
             "type": "bar",
             "bar_index": event["snapshot"]["bar_index"],
             "timestamp": event["snapshot"]["timestamp"],
@@ -68,6 +77,9 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
             "signal": event["signal"],
             "trade": event["trade"],
         }
+        if event.get("dividend"):
+            msg["dividend"] = event["dividend"]
+
         await websocket.send_json(msg)
 
         if event["trade"]:
@@ -75,13 +87,26 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
         snapshots_batch.append(event["snapshot"])
 
     db = get_db()
+    initial_cash = float(data.get("initial_cash", 10000))
+
+    snapshots_df = pd.DataFrame(snapshots_batch) if snapshots_batch else pd.DataFrame(columns=["equity"])
+    trades_df = pd.DataFrame(trades_batch) if trades_batch else pd.DataFrame(columns=["side", "pnl"])
+    metrics = calculate_metrics(snapshots_df, trades_df, initial_cash)
+
     run_id = db.save_backtest_run({
         "strategy_name": data["strategy_name"],
         "parameters": json.dumps(data.get("parameters")),
         "symbol": data["symbol"],
         "start_date": data["start_date"],
         "end_date": data.get("end_date") or end.date().isoformat(),
-        "initial_cash": float(data.get("initial_cash", 10000)),
+        "initial_cash": initial_cash,
+        "final_equity": metrics["final_equity"],
+        "total_return": metrics["total_return_pct"],
+        "sharpe_ratio": metrics["sharpe_ratio"],
+        "max_drawdown": metrics["max_drawdown_pct"],
+        "win_rate": metrics["win_rate_pct"],
+        "num_trades": metrics["num_trades"],
+        "profit_factor": metrics["profit_factor"],
     })
 
     if trades_batch:
@@ -89,13 +114,10 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
     if snapshots_batch:
         db.save_backtest_snapshots(run_id, snapshots_batch)
 
-    runs = db.get_backtest_runs(limit=1)
-    match = [r for r in runs if r["id"] == run_id]
-
     await websocket.send_json({
         "type": "complete",
         "run_id": run_id,
-        "metrics": match[0] if match else None,
+        "metrics": metrics,
     })
 
 
@@ -121,4 +143,22 @@ async def _handle_replay(websocket: WebSocket, run_id: int) -> None:
             "trade": trade_map.get(snap["bar_index"]),
         })
 
-    await websocket.send_json({"type": "complete", "run_id": run_id})
+    run_row = db.get_backtest_run_by_id(run_id)
+    metrics = None
+    if run_row and run_row.get("final_equity") is not None:
+        row = run_row
+        metrics = {
+            "total_return_pct": row.get("total_return", 0) or 0,
+            "final_equity": row.get("final_equity", 0) or 0,
+            "sharpe_ratio": row.get("sharpe_ratio", 0) or 0,
+            "max_drawdown_pct": row.get("max_drawdown", 0) or 0,
+            "win_rate_pct": row.get("win_rate", 0) or 0,
+            "num_trades": row.get("num_trades", 0) or 0,
+            "profit_factor": row.get("profit_factor", 0) or 0,
+        }
+
+    await websocket.send_json({
+        "type": "complete",
+        "run_id": run_id,
+        "metrics": metrics,
+    })

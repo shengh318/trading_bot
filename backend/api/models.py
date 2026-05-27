@@ -72,3 +72,27 @@ class BacktestRunResponse(BaseModel):
     initial_cash: float
     metrics: Optional[BacktestMetrics] = None
     created_at: str
+
+
+def db_row_to_backtest_run_response(row: dict) -> BacktestRunResponse:
+    metrics = None
+    if row.get("final_equity") is not None:
+        metrics = BacktestMetrics(
+            total_return_pct=row.get("total_return", 0) or 0,
+            final_equity=row.get("final_equity", 0) or 0,
+            sharpe_ratio=row.get("sharpe_ratio", 0) or 0,
+            max_drawdown_pct=row.get("max_drawdown", 0) or 0,
+            win_rate_pct=row.get("win_rate", 0) or 0,
+            num_trades=row.get("num_trades", 0) or 0,
+            profit_factor=row.get("profit_factor", 0) or 0,
+        )
+    return BacktestRunResponse(
+        id=row["id"],
+        strategy_name=row["strategy_name"],
+        symbol=row["symbol"],
+        start_date=row["start_date"],
+        end_date=row["end_date"],
+        initial_cash=row["initial_cash"],
+        metrics=metrics,
+        created_at=row["created_at"],
+    )

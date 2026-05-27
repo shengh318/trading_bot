@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTheme } from "./theme/ThemeContext";
 import Dashboard from "./pages/Dashboard";
 import Backtest from "./pages/Backtest";
 import Strategies from "./pages/Strategies";
@@ -13,10 +14,27 @@ const TABS: { key: Tab; label: string }[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  const { isDark, toggleTheme, colors } = useTheme();
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: 16 }}>
-      <h1 style={{ margin: 0, marginBottom: 16 }}>TraderBot</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <h1 style={{ margin: 0 }}>TraderBot</h1>
+        <button
+          onClick={toggleTheme}
+          style={{
+            padding: "6px 14px",
+            background: colors.surface,
+            color: colors.text,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 6,
+            cursor: "pointer",
+            fontSize: 13,
+          }}
+        >
+          {isDark ? "☀️ Light" : "🌙 Dark"}
+        </button>
+      </div>
       <nav style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {TABS.map((t) => (
           <button
@@ -25,8 +43,8 @@ export default function App() {
             style={{
               padding: "8px 20px",
               fontWeight: activeTab === t.key ? 700 : 400,
-              background: activeTab === t.key ? "#1a73e8" : "#e8eaed",
-              color: activeTab === t.key ? "#fff" : "#000",
+              background: activeTab === t.key ? colors.primary : colors.tabInactive,
+              color: activeTab === t.key ? "#fff" : colors.text,
               border: "none",
               borderRadius: 6,
               cursor: "pointer",

@@ -6,6 +6,7 @@ import {
   type BacktestMetrics,
   type Trade,
 } from "../api/client";
+import { useTheme } from "../theme/ThemeContext";
 import StrategySelector from "../components/StrategySelector";
 import PortfolioChart from "../components/PortfolioChart";
 
@@ -20,6 +21,7 @@ const EMPTY_METRICS: BacktestMetrics = {
 };
 
 export default function Backtest() {
+  const { colors } = useTheme();
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [selectedStrategy, setSelectedStrategy] = useState("");
   const [params, setParams] = useState<Record<string, unknown>>({});
@@ -102,9 +104,14 @@ export default function Backtest() {
               `${event.trade.side.toUpperCase()} ${event.trade.qty} ${event.trade.symbol} @ $${event.trade.price}`,
             );
           }
+          if (event.dividend) {
+            addLog(
+              `DIVIDEND $${event.dividend.dividend.toFixed(2)} received`,
+            );
+          }
         },
         onComplete: (event) => {
-          setMetrics((event.metrics?.metrics as BacktestMetrics) ?? EMPTY_METRICS);
+          setMetrics(event.metrics ?? EMPTY_METRICS);
           setRunning(false);
           addLog("Simulation complete!");
           api.getBacktestRuns().then(setPastRuns);
@@ -153,7 +160,8 @@ export default function Backtest() {
             setTrades((prev) => [...prev, event.trade!]);
           }
         },
-        onComplete: () => {
+        onComplete: (event) => {
+          setMetrics(event.metrics ?? EMPTY_METRICS);
           setRunning(false);
           addLog("Replay complete!");
         },
@@ -178,10 +186,19 @@ export default function Backtest() {
 
   const metricStyle: React.CSSProperties = {
     padding: "8px 16px",
-    background: "#f8f9fa",
+    background: colors.surface,
     borderRadius: 6,
     textAlign: "center",
     fontSize: 13,
+  };
+
+  const inputStyle: React.CSSProperties = {
+    padding: "4px 8px",
+    fontSize: 14,
+    background: colors.inputBg,
+    color: colors.text,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
   };
 
   return (
@@ -203,7 +220,7 @@ export default function Backtest() {
             <input
               value={symbol}
               onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              style={{ padding: "4px 8px", fontSize: 14, width: 100 }}
+              style={{ ...inputStyle, width: 100 }}
             />
           </div>
           <div style={{ marginBottom: 8 }}>
@@ -212,7 +229,7 @@ export default function Backtest() {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              style={{ padding: "4px 8px", fontSize: 14 }}
+              style={inputStyle}
             />
           </div>
           <div style={{ marginBottom: 16 }}>
@@ -227,7 +244,7 @@ export default function Backtest() {
                 const v = e.target.value;
                 if (v === "" || /^\d+(\.\d*)?$/.test(v)) setInitialCash(v);
               }}
-              style={{ padding: "4px 8px", fontSize: 14, width: 120 }}
+              style={{ ...inputStyle, width: 120 }}
             />
           </div>
           <button
@@ -235,7 +252,7 @@ export default function Backtest() {
             disabled={running}
             style={{
               padding: "8px 24px",
-              background: running ? "#ccc" : "#1a73e8",
+              background: running ? colors.border : colors.primary,
               color: "#fff",
               border: "none",
               borderRadius: 6,
@@ -254,7 +271,7 @@ export default function Backtest() {
                   onClick={clearRuns}
                   style={{
                     padding: "2px 10px",
-                    background: "#c5221f",
+                    background: colors.negative,
                     color: "#fff",
                     border: "none",
                     borderRadius: 4,
@@ -267,16 +284,16 @@ export default function Backtest() {
               )}
             </div>
             {pastRuns.length === 0 ? (
-              <p style={{ fontSize: 13, color: "#777" }}>No runs yet</p>
+              <p style={{ fontSize: 13, color: colors.textMuted }}>No runs yet</p>
             ) : (
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>ID</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Strategy</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Symbol</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Return</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}></th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>ID</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Strategy</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Symbol</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Return</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -296,7 +313,8 @@ export default function Backtest() {
                           disabled={running}
                           style={{
                             padding: "2px 10px",
-                            background: "#e8eaed",
+                            background: colors.tabInactive,
+                            color: colors.text,
                             border: "none",
                             borderRadius: 4,
                             cursor: "pointer",
@@ -315,7 +333,7 @@ export default function Backtest() {
         </div>
 
         <div style={{ flex: 2 }}>
-          <PortfolioChart data={equityPoints} markers={equityPoints.length > 0 ? markers : undefined} />
+          <PortfolioChart data={equityPoints} markers={equityPoints.length > 0 ? markers : undefined} initialCash={Number(initialCash)} />
 
           {metrics && (
             <div
@@ -328,7 +346,7 @@ export default function Backtest() {
             >
               <div style={metricStyle}>
                 <strong>Return</strong>
-                <div style={{ color: metrics.total_return_pct >= 0 ? "#0b8043" : "#c5221f" }}>
+                <div style={{ color: metrics.total_return_pct >= 0 ? colors.positive : colors.negative }}>
                   {metrics.total_return_pct >= 0 ? "+" : ""}
                   {metrics.total_return_pct.toFixed(2)}%
                 </div>
@@ -343,7 +361,7 @@ export default function Backtest() {
               </div>
               <div style={metricStyle}>
                 <strong>Drop</strong>
-                <div style={{ color: "#c5221f" }}>{metrics.max_drawdown_pct.toFixed(2)}%</div>
+                <div style={{ color: colors.negative }}>{metrics.max_drawdown_pct.toFixed(2)}%</div>
               </div>
               <div style={metricStyle}>
                 <strong>Win %</strong>
@@ -370,17 +388,17 @@ export default function Backtest() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Bar</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Action</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Qty</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Price</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Profit/Loss</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Bar</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Action</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Qty</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Price</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: `1px solid ${colors.tableBorder}` }}>Profit/Loss</th>
                   </tr>
                 </thead>
                 <tbody>
                   {trades.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: "4px 8px", color: "#777" }}>
+                      <td colSpan={5} style={{ padding: "4px 8px", color: colors.textMuted }}>
                         No actions yet
                       </td>
                     </tr>
@@ -391,7 +409,7 @@ export default function Backtest() {
                         <td
                           style={{
                             padding: "4px 8px",
-                            color: t.side === "buy" ? "#0b8043" : "#c5221f",
+                            color: t.side === "buy" ? colors.positive : colors.negative,
                           }}
                         >
                           {t.side}
@@ -401,7 +419,7 @@ export default function Backtest() {
                         <td
                           style={{
                             padding: "4px 8px",
-                            color: t.pnl != null ? (t.pnl >= 0 ? "#0b8043" : "#c5221f") : undefined,
+                            color: t.pnl != null ? (t.pnl >= 0 ? colors.positive : colors.negative) : undefined,
                           }}
                         >
                           {t.pnl != null ? `$${t.pnl.toFixed(2)}` : "-"}
@@ -418,8 +436,8 @@ export default function Backtest() {
                 style={{
                   maxHeight: 200,
                   overflowY: "auto",
-                  background: "#1e1e1e",
-                  color: "#d4d4d4",
+                  background: colors.logBg,
+                  color: colors.logText,
                   padding: 8,
                   borderRadius: 6,
                   fontSize: 12,
@@ -427,7 +445,7 @@ export default function Backtest() {
                 }}
               >
                 {log.length === 0 ? (
-                  <span style={{ color: "#777" }}>No events yet</span>
+                  <span style={{ color: colors.textMuted }}>No events yet</span>
                 ) : (
                   log.map((line, i) => <div key={i}>{line}</div>)
                 )}

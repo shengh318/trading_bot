@@ -1,3 +1,4 @@
+import { useTheme } from "../theme/ThemeContext";
 import type { StrategyInfo } from "../api/client";
 
 interface Props {
@@ -15,7 +16,17 @@ export default function StrategySelector({
   onSelect,
   onParamChange,
 }: Props) {
+  const { colors } = useTheme();
   const current = strategies.find((s) => s.name === selected);
+
+  const inputStyle: React.CSSProperties = {
+    padding: "4px 8px",
+    fontSize: 14,
+    background: colors.inputBg,
+    color: colors.text,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+  };
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -23,7 +34,7 @@ export default function StrategySelector({
       <select
         value={selected}
         onChange={(e) => onSelect(e.target.value)}
-        style={{ padding: "4px 8px", fontSize: 14 }}
+        style={{ ...inputStyle, width: undefined }}
       >
         {strategies.map((s) => (
           <option key={s.name} value={s.name}>
@@ -32,7 +43,7 @@ export default function StrategySelector({
         ))}
       </select>
       {current && (
-        <p style={{ fontSize: 13, color: "#555", margin: "4px 0 0" }}>
+        <p style={{ fontSize: 13, color: colors.textSecondary, margin: "4px 0 0" }}>
           {current.description}
         </p>
       )}
@@ -50,7 +61,7 @@ export default function StrategySelector({
                 p.type === "int" ? parseInt(e.target.value, 10) : e.target.value,
               )
             }
-            style={{ padding: "4px 8px", fontSize: 14, width: 120 }}
+            style={{ ...inputStyle, width: 120 }}
           />
         </div>
       ))}

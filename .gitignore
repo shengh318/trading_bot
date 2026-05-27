@@ -29,6 +29,8 @@ frontend/dist/
 
 # SQLite
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 
 # Data cache

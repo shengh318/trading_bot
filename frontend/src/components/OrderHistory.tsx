@@ -1,24 +1,27 @@
+import { useTheme } from "../theme/ThemeContext";
 import type { Order } from "../api/client";
 
 interface Props {
   orders: Order[];
 }
 
-const cellStyle: React.CSSProperties = {
-  padding: "6px 12px",
-  textAlign: "left",
-  borderBottom: "1px solid #e0e0e0",
-  fontSize: 13,
-};
-
-const headerStyle: React.CSSProperties = {
-  ...cellStyle,
-  fontWeight: 600,
-  background: "#f8f9fa",
-  borderTop: "1px solid #e0e0e0",
-};
-
 export default function OrderHistory({ orders }: Props) {
+  const { colors } = useTheme();
+
+  const cellStyle: React.CSSProperties = {
+    padding: "6px 12px",
+    textAlign: "left",
+    borderBottom: `1px solid ${colors.border}`,
+    fontSize: 13,
+  };
+
+  const headerStyle: React.CSSProperties = {
+    ...cellStyle,
+    fontWeight: 600,
+    background: colors.surface,
+    borderTop: `1px solid ${colors.border}`,
+  };
+
   return (
     <div style={{ marginBottom: 16 }}>
       <h3 style={{ margin: "0 0 8px" }}>Order History</h3>
@@ -51,7 +54,7 @@ export default function OrderHistory({ orders }: Props) {
                 <td
                   style={{
                     ...cellStyle,
-                    color: o.side === "buy" ? "#0b8043" : "#c5221f",
+                    color: o.side === "buy" ? colors.positive : colors.negative,
                   }}
                 >
                   {o.side}

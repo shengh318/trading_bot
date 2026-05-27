@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { ThemeProvider } from "./theme/ThemeContext";
 import App from "./App";
 
 beforeEach(() => {
@@ -38,7 +39,7 @@ beforeEach(() => {
 
 describe("App", () => {
   it("renders title and nav tabs", () => {
-    render(<App />);
+    render(<ThemeProvider><App /></ThemeProvider>);
     expect(screen.getByText("TraderBot")).toBeDefined();
     expect(screen.getByText("Dashboard")).toBeDefined();
     expect(screen.getByText("Backtest")).toBeDefined();
@@ -46,14 +47,14 @@ describe("App", () => {
   });
 
   it("defaults to Dashboard tab", async () => {
-    render(<App />);
+    render(<ThemeProvider><App /></ThemeProvider>);
     await waitFor(() => {
       expect(screen.getByText("No holdings")).toBeDefined();
     });
   });
 
   it("switches to Backtest tab on click", async () => {
-    render(<App />);
+    render(<ThemeProvider><App /></ThemeProvider>);
     fireEvent.click(screen.getByText("Backtest"));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Run Simulation" })).toBeDefined();
@@ -61,7 +62,7 @@ describe("App", () => {
   });
 
   it("switches to Strategies tab on click", async () => {
-    render(<App />);
+    render(<ThemeProvider><App /></ThemeProvider>);
     fireEvent.click(screen.getByText("Strategies"));
     await waitFor(() => {
       expect(screen.getByText("Available Strategies")).toBeDefined();

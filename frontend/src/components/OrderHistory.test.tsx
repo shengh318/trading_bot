@@ -1,16 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { ThemeProvider } from "../theme/ThemeContext";
 import OrderHistory from "./OrderHistory";
 
 describe("OrderHistory", () => {
   it("shows empty state", () => {
-    render(<OrderHistory orders={[]} />);
+    render(<ThemeProvider><OrderHistory orders={[]} /></ThemeProvider>);
     expect(screen.getByText("No orders")).toBeDefined();
   });
 
   it("renders order rows", () => {
     render(
-      <OrderHistory
+      <ThemeProvider><OrderHistory
         orders={[
           {
             id: "ord_abc123",
@@ -37,7 +38,7 @@ describe("OrderHistory", () => {
             updated_at: "2024-01-16T10:00:00Z",
           },
         ]}
-      />,
+      /></ThemeProvider>,
     );
     expect(screen.getByText("ord_abc1")).toBeDefined();
     expect(screen.getByText("AAPL")).toBeDefined();
@@ -50,7 +51,7 @@ describe("OrderHistory", () => {
 
   it("colors buy green and sell red", () => {
     render(
-      <OrderHistory
+      <ThemeProvider><OrderHistory
         orders={[
           {
             id: "1", symbol: "AAPL", side: "buy", qty: 10, filled_qty: 10, filled_avg_price: 150,
@@ -61,7 +62,7 @@ describe("OrderHistory", () => {
             status: "pending", type: "limit", created_at: "2024-01-16T10:00:00Z", updated_at: "2024-01-16T10:00:00Z",
           },
         ]}
-      />,
+      /></ThemeProvider>,
     );
     expect(screen.getByText("buy").style.color).toBe("rgb(11, 128, 67)");
     expect(screen.getByText("sell").style.color).toBe("rgb(197, 34, 31)");

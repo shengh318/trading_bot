@@ -1,3 +1,4 @@
+import { useTheme } from "../theme/ThemeContext";
 import type { AccountSummary as AccountSummaryType } from "../api/client";
 
 interface Props {
@@ -5,6 +6,7 @@ interface Props {
 }
 
 export default function AccountSummary({ summary }: Props) {
+  const { colors } = useTheme();
   if (!summary) return null;
   return (
     <div
@@ -12,7 +14,7 @@ export default function AccountSummary({ summary }: Props) {
         display: "flex",
         gap: 24,
         padding: "12px 20px",
-        background: "#f8f9fa",
+        background: colors.surface,
         borderRadius: 8,
         marginBottom: 16,
         fontSize: 14,
@@ -34,7 +36,7 @@ export default function AccountSummary({ summary }: Props) {
         <strong>Today's Profit/Loss</strong>
         <div
           style={{
-            color: summary.day_pnl >= 0 ? "#0b8043" : "#c5221f",
+            color: summary.day_pnl >= 0 ? colors.positive : colors.negative,
           }}
         >
           {summary.day_pnl >= 0
