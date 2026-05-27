@@ -2,7 +2,8 @@
 
 ## Commands
 
-- **Run backend**: `python backend/api/main.py`
+- **Activate venv**: `source .venv/bin/activate`
+- **Run backend**: `.venv/bin/uvicorn backend.api.main:app --reload`
 - **Run frontend**: `cd frontend && npm run dev`
 - **Install backend deps**: `pip install -r backend/requirements.txt`
 - **Install frontend deps**: `cd frontend && npm install`
