@@ -146,8 +146,7 @@ describe("BacktestSocket", () => {
       timestamp: "2024-01-01",
       equity: 10000,
       cash: 5000,
-      signal: "hold",
-      trade: null,
+      trades: [],
     };
     mockWs.onmessage?.(new MessageEvent("message", { data: JSON.stringify(event) }));
     expect(onBar).toHaveBeenCalledWith(event);

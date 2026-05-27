@@ -7,6 +7,7 @@ class Signal:
     BUY = "buy"
     SELL = "sell"
     HOLD = "hold"
+    EXIT = "exit"
 
 
 class Portfolio:

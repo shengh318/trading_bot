@@ -4,7 +4,7 @@ from backend.strategies.base import Strategy, Signal, Portfolio
 
 
 class SmaCrossover(Strategy):
-    def __init__(self, short_window: int = 20, long_window: int = 50):
+    def __init__(self, short_window: int = 10, long_window: int = 50):
         self.short_window = short_window
         self.long_window = long_window
 

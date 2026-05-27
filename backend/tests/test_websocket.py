@@ -90,6 +90,6 @@ class TestWebSocketRun:
                     bars_received += 1
                     assert "equity" in msg
                     assert "cash" in msg
-                    assert "signal" in msg
+                    assert "trades" in msg
 
             assert bars_received == 5

@@ -1,14 +1,33 @@
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from backend.api.deps import get_db
-from backend.backtest.engine import BacktestEngine
+from backend.backtest.engine import BacktestEngine, MultiSymbolBacktestEngine
 from backend.backtest.metrics import calculate_metrics
 from backend.data.loader import DataLoader
 from backend.strategies.registry import get_strategy
+
+
+def _parse_timeframe(tf_str: str) -> TimeFrame:
+    tf_str = tf_str.strip()
+    m = re.match(r"^(\d+)\s*(Min|Hour|Day|Week|Month)$", tf_str, re.IGNORECASE)
+    if not m:
+        return TimeFrame.Day
+    amount = int(m.group(1))
+    unit = m.group(2).lower()
+    unit_map = {
+        "min": TimeFrameUnit.Minute,
+        "hour": TimeFrameUnit.Hour,
+        "day": TimeFrameUnit.Day,
+        "week": TimeFrameUnit.Week,
+        "month": TimeFrameUnit.Month,
+    }
+    return TimeFrame(amount, unit_map[unit])
 
 ws_router = APIRouter()
 
@@ -41,27 +60,35 @@ async def backtest_websocket(websocket: WebSocket):
 
 
 async def _handle_run(websocket: WebSocket, data: dict) -> None:
-    strategy = get_strategy(data["strategy_name"], data.get("parameters"))
-
     loader = DataLoader()
     end = datetime.fromisoformat(data["end_date"]) if data.get("end_date") else (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1))
     start = datetime.fromisoformat(data["start_date"])
-    df = loader.load_bars(
-        symbol=data["symbol"],
-        start=start,
-        end=end,
-    )
-    div_df = loader.load_dividends(
-        symbol=data["symbol"],
-        start=start,
-        end=end,
-    )
 
-    engine = BacktestEngine(
-        df, strategy,
-        symbol=data["symbol"],
+    symbols: list[str] = data.get("symbols") or [data["symbol"]]
+    timeframe = _parse_timeframe(data.get("timeframe", "1Day"))
+
+    data_frames: dict[str, pd.DataFrame] = {}
+    div_frames: dict[str, pd.DataFrame] = {}
+    for sym in symbols:
+        data_frames[sym] = loader.load_bars(
+            symbol=sym,
+            start=start,
+            end=end,
+            timeframe=timeframe,
+        )
+        div_frames[sym] = loader.load_dividends(
+            symbol=sym,
+            start=start,
+            end=end,
+        )
+
+    strategy_cls = get_strategy(data["strategy_name"], data.get("parameters")).__class__
+
+    engine = MultiSymbolBacktestEngine(
+        data_frames, strategy_cls,
         initial_cash=float(data.get("initial_cash", 10000)),
-        dividends=div_df,
+        dividends=div_frames,
+        parameters=data.get("parameters"),
     )
 
     trades_batch: list[dict] = []
@@ -74,16 +101,12 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
             "timestamp": event["snapshot"]["timestamp"],
             "equity": event["snapshot"]["equity"],
             "cash": event["snapshot"]["cash"],
-            "signal": event["signal"],
-            "trade": event["trade"],
+            "trades": event["trades"],
         }
-        if event.get("dividend"):
-            msg["dividend"] = event["dividend"]
 
         await websocket.send_json(msg)
 
-        if event["trade"]:
-            trades_batch.append(event["trade"])
+        trades_batch.extend(event["trades"])
         snapshots_batch.append(event["snapshot"])
 
     db = get_db()
@@ -93,10 +116,11 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
     trades_df = pd.DataFrame(trades_batch) if trades_batch else pd.DataFrame(columns=["side", "pnl"])
     metrics = calculate_metrics(snapshots_df, trades_df, initial_cash)
 
+    symbols_str = ",".join(symbols)
     run_id = db.save_backtest_run({
         "strategy_name": data["strategy_name"],
         "parameters": json.dumps(data.get("parameters")),
-        "symbol": data["symbol"],
+        "symbol": symbols_str,
         "start_date": data["start_date"],
         "end_date": data.get("end_date") or end.date().isoformat(),
         "initial_cash": initial_cash,

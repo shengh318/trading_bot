@@ -104,9 +104,7 @@ export interface WsBarEvent {
   timestamp: string;
   equity: number;
   cash: number;
-  signal: string;
-  trade: Trade | null;
-  dividend?: DividendEvent;
+  trades: Trade[];
 }
 
 export interface WsCompleteEvent {

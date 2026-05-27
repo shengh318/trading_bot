@@ -10,6 +10,8 @@ import { useTheme } from "../theme/ThemeContext";
 import StrategySelector from "../components/StrategySelector";
 import PortfolioChart from "../components/PortfolioChart";
 
+const AVAILABLE_SYMBOLS = ["NVDA", "AMD", "VOO", "SPY", "META"];
+
 const EMPTY_METRICS: BacktestMetrics = {
   total_return_pct: 0,
   final_equity: 0,
@@ -25,9 +27,10 @@ export default function Backtest() {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [selectedStrategy, setSelectedStrategy] = useState("");
   const [params, setParams] = useState<Record<string, unknown>>({});
-  const [symbol, setSymbol] = useState("AAPL");
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([...AVAILABLE_SYMBOLS]);
   const [startDate, setStartDate] = useState("2024-01-01");
   const [initialCash, setInitialCash] = useState("100");
+  const [timeframe, setTimeframe] = useState("1Day");
   const [running, setRunning] = useState(false);
   const [pastRuns, setPastRuns] = useState<BacktestRun[]>([]);
   const [equityPoints, setEquityPoints] = useState<{ time: import("lightweight-charts").Time; value: number }[]>([]);
@@ -39,7 +42,14 @@ export default function Backtest() {
   const markers = trades.map((t) => ({
     time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
     side: t.side as "buy" | "sell",
+    symbol: t.symbol,
   }));
+
+  const toggleSymbol = (sym: string) => {
+    setSelectedSymbols((prev) =>
+      prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym]
+    );
+  };
 
   useEffect(() => {
     api.getStrategies().then((list) => {
@@ -98,15 +108,10 @@ export default function Backtest() {
               value: event.equity,
             },
           ]);
-          if (event.trade) {
-            setTrades((prev) => [...prev, event.trade!]);
+          for (const trade of event.trades) {
+            setTrades((prev) => [...prev, trade]);
             addLog(
-              `${event.trade.side.toUpperCase()} ${event.trade.qty} ${event.trade.symbol} @ $${event.trade.price}`,
-            );
-          }
-          if (event.dividend) {
-            addLog(
-              `DIVIDEND $${event.dividend.dividend.toFixed(2)} received`,
+              `${trade.side.toUpperCase()} ${Number.isInteger(trade.qty) ? trade.qty : trade.qty.toFixed(4)} ${trade.symbol} @ $${trade.price.toFixed(2)}`,
             );
           }
         },
@@ -125,16 +130,17 @@ export default function Backtest() {
       ws.send({
         action: "run",
         strategy_name: selectedStrategy,
-        symbol,
+        symbols: selectedSymbols,
         start_date: startDate,
         initial_cash: Number(initialCash),
         parameters: params,
+        timeframe,
       });
     } catch {
       addLog("Failed to connect to WebSocket");
       setRunning(false);
     }
-  }, [selectedStrategy, symbol, startDate, initialCash, params]);
+  }, [selectedStrategy, selectedSymbols, startDate, initialCash, params, timeframe]);
 
   const replayRun = useCallback(async (runId: number) => {
     setRunning(true);
@@ -156,8 +162,8 @@ export default function Backtest() {
               value: event.equity,
             },
           ]);
-          if (event.trade) {
-            setTrades((prev) => [...prev, event.trade!]);
+          for (const trade of event.trades) {
+            setTrades((prev) => [...prev, trade]);
           }
         },
         onComplete: (event) => {
@@ -216,12 +222,18 @@ export default function Backtest() {
             }
           />
           <div style={{ marginBottom: 8 }}>
-            <label style={{ marginRight: 8, fontWeight: 600 }}>Symbol:</label>
-            <input
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              style={{ ...inputStyle, width: 100 }}
-            />
+            <label style={{ marginRight: 8, fontWeight: 600 }}>Symbols:</label>
+            {AVAILABLE_SYMBOLS.map((sym) => (
+              <label key={sym} style={{ marginRight: 12, cursor: "pointer", fontSize: 14 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedSymbols.includes(sym)}
+                  onChange={() => toggleSymbol(sym)}
+                  style={{ marginRight: 4 }}
+                />
+                {sym}
+              </label>
+            ))}
           </div>
           <div style={{ marginBottom: 8 }}>
             <label style={{ marginRight: 8, fontWeight: 600 }}>Start:</label>
@@ -246,6 +258,19 @@ export default function Backtest() {
               }}
               style={{ ...inputStyle, width: 120 }}
             />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ marginRight: 8, fontWeight: 600 }}>Timeframe:</label>
+            <select
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value)}
+              style={{ ...inputStyle, width: 100 }}
+            >
+              <option value="1Day">1 Day</option>
+              <option value="5Min">5 Min</option>
+              <option value="15Min">15 Min</option>
+              <option value="1Hour">1 Hour</option>
+            </select>
           </div>
           <button
             onClick={runBacktest}
