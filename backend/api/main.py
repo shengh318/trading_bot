@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api import deps
 from backend.api.routes import router
 from backend.api.websocket import ws_router
+from backend.api.live_routes import live_router
+from backend.api.live_websocket import live_ws_router
+from backend.api.alpaca_routes import alpaca_router
 from backend.config import validate_config
 from backend.data.store import Database
 
@@ -28,6 +31,9 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(ws_router)
+app.include_router(live_router)
+app.include_router(live_ws_router)
+app.include_router(alpaca_router)
 
 
 @app.get("/api/health")

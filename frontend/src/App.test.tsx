@@ -10,30 +10,29 @@ beforeEach(() => {
     if (url.toString().includes("/api/strategies")) {
       return Promise.resolve({ json: () => Promise.resolve([]) } as Response);
     }
-    if (url.toString().includes("/api/portfolio/summary")) {
-      return Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            cash: 10000,
-            portfolio_value: 15000,
-            buying_power: 20000,
-            day_pnl: 100,
-          }),
-      } as Response);
+    const okResponse = (data: unknown) =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve(data) } as unknown as Response);
+    if (url.toString().includes("/api/alpaca/account")) {
+      return okResponse({
+        cash: 10000,
+        portfolio_value: 15000,
+        buying_power: 20000,
+        day_pnl: 100,
+      });
     }
-    if (url.toString().includes("/api/positions")) {
-      return Promise.resolve({ json: () => Promise.resolve([]) } as Response);
+    if (url.toString().includes("/api/alpaca/positions")) {
+      return okResponse([]);
     }
-    if (url.toString().includes("/api/orders")) {
-      return Promise.resolve({ json: () => Promise.resolve([]) } as Response);
+    if (url.toString().includes("/api/alpaca/orders")) {
+      return okResponse([]);
     }
-    if (url.toString().includes("/api/portfolio/equity-curve")) {
-      return Promise.resolve({ json: () => Promise.resolve([]) } as Response);
+    if (url.toString().includes("/api/alpaca/portfolio-history")) {
+      return okResponse([]);
     }
     if (url.toString().includes("/api/backtest/runs")) {
-      return Promise.resolve({ json: () => Promise.resolve([]) } as Response);
+      return okResponse([]);
     }
-    return Promise.resolve({ json: () => Promise.resolve({}) } as Response);
+    return okResponse({});
   });
 });
 

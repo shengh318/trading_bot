@@ -3,11 +3,14 @@ import { useTheme } from "./theme/ThemeContext";
 import Dashboard from "./pages/Dashboard";
 import Backtest from "./pages/Backtest";
 import Strategies from "./pages/Strategies";
+import Live from "./pages/Live";
+import Clock from "./components/Clock";
 
-type Tab = "dashboard" | "backtest" | "strategies";
+type Tab = "dashboard" | "backtest" | "strategies" | "live";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "dashboard", label: "Dashboard" },
+  { key: "live", label: "Live" },
   { key: "backtest", label: "Backtest" },
   { key: "strategies", label: "Strategies" },
 ];
@@ -20,6 +23,7 @@ export default function App() {
     <div style={{ fontFamily: "system-ui, sans-serif", padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <h1 style={{ margin: 0 }}>TraderBot</h1>
+        <Clock />
         <button
           onClick={toggleTheme}
           style={{
@@ -55,6 +59,7 @@ export default function App() {
         ))}
       </nav>
       {activeTab === "dashboard" && <Dashboard />}
+      {activeTab === "live" && <Live />}
       {activeTab === "backtest" && <Backtest />}
       {activeTab === "strategies" && <Strategies />}
     </div>
