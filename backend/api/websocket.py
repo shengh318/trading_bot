@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -42,7 +42,7 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
     strategy = get_strategy(data["strategy_name"], data.get("parameters"))
 
     loader = DataLoader()
-    end = datetime.fromisoformat(data["end_date"]) if data.get("end_date") else datetime.now(timezone.utc)
+    end = datetime.fromisoformat(data["end_date"]) if data.get("end_date") else (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1))
     df = loader.load_bars(
         symbol=data["symbol"],
         start=datetime.fromisoformat(data["start_date"]),

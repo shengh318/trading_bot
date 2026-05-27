@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
@@ -95,7 +95,7 @@ def run_backtest(req: BacktestRunRequest):
 
     try:
         loader = DataLoader()
-        end = datetime.fromisoformat(req.end_date) if req.end_date else datetime.now(timezone.utc)
+        end = datetime.fromisoformat(req.end_date) if req.end_date else (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1))
         df = loader.load_bars(
             symbol=req.symbol,
             start=datetime.fromisoformat(req.start_date),
