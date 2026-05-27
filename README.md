@@ -1,18 +1,19 @@
 # TraderBot
 
-Simulation tool to test stock trading strategies — no account needed.
+Backtest and live-trade stock strategies via a web dashboard — works with or without an Alpaca account.
 
 ## Architecture
 
 ```
-Frontend (React + Vite)                           ──►  Portfolio chart, holdings,
-  ▲  HTTP REST + WebSocket                              order history, strategy setup
+Frontend (React + Vite + Lightweight Charts)      ──►  Dashboard, Live, Backtest, Strategies
+  ▲  HTTP REST / WebSocket
   │
-Backend (FastAPI + Python)                        ──►  API layer + simulation engine
+Backend (FastAPI + Python)                        ──►  API layer + simulation + live engine
   │
-  ├── Alpaca Broker API (optional)                ──►  Real market data
-  ├── Custom Simulation Engine                    ──►  Bar-by-bar simulation
-  └── SQLite                                       ──►  Trades, snapshots, run history
+  ├── Alpaca Broker API                           ──►  Market data + live order execution
+  ├── Custom Backtest Engine                      ──►  Bar-by-bar simulation (single/multi symbol)
+  ├── Live Trading Engine                         ──►  Real-time strategy execution on Alpaca
+  └── SQLite                                       ──►  Trades, snapshots, backtest runs
 ```
 
 ## Project Structure
@@ -20,28 +21,41 @@ Backend (FastAPI + Python)                        ──►  API layer + simulat
 ```
 trader/
 ├── backend/
-│   ├── api/              FastAPI routes, WebSocket, models, deps
-│   │   ├── main.py       FastAPI app entry + lifespan
-│   │   ├── routes.py     REST endpoints (portfolio, holdings, orders, simulation)
-│   │   ├── websocket.py  WebSocket handler (live simulation streaming)
-│   │   ├── models.py     Pydantic response models
-│   │   └── deps.py       Shared DB dependency
-│   ├── strategies/       Strategy base class + implementations
-│   │   ├── base.py       Abstract Strategy + Signal + Portfolio
-│   │   ├── registry.py   Strategy registry (discovery + instantiation)
-│   │   └── sma_crossover.py
-│   ├── backtest/         Custom simulation engine + metrics
-│   │   ├── engine.py     Bar-by-bar simulation
-│   │   └── metrics.py    Sharpe, drawdown, win rate, etc.
-│   ├── data/             Alpaca data loader & SQLite store
-│   ├── tests/            71 pytest tests covering all modules
-│   └── config.py         Settings & env vars
+│   ├── api/               FastAPI routes, WebSockets, models, deps
+│   │   ├── main.py        FastAPI app entry + lifespan + CORS
+│   │   ├── routes.py      REST: portfolio, positions, orders, backtest CRUD
+│   │   ├── websocket.py   /ws/backtest — streaming backtest + replay
+│   │   ├── live_routes.py REST: live engine status / stop
+│   │   ├── live_websocket.py  /ws/live — streaming live trading
+│   │   ├── alpaca_routes.py   Alpaca account / positions / orders proxy
+│   │   ├── models.py      Pydantic response models
+│   │   └── deps.py        Shared DB dependency
+│   ├── strategies/        Strategy base class + implementations
+│   │   ├── base.py        Abstract Strategy + Signal + Portfolio
+│   │   ├── registry.py    Strategy registry (discovery + instantiation)
+│   │   ├── sma_crossover.py    SMA crossover strategy
+│   │   └── simple_strat_1.py   Mean-reversion DCA strategy
+│   ├── backtest/          Custom simulation engine + metrics
+│   │   ├── engine.py      Bar-by-bar simulation (single & multi-symbol)
+│   │   └── metrics.py     Sharpe, drawdown, win rate, profit factor
+│   ├── engine/            Live trading engine
+│   │   └── live.py        Real-time Alpaca execution with market-open detection
+│   ├── data/              Alpaca data loader & SQLite store
+│   │   ├── loader.py      Fetches OHLCV + dividends, caches as Parquet
+│   │   ├── store.py       SQLite CRUD for snapshots, positions, orders, runs
+│   │   └── cache/         Parquet cache for bars & dividends
+│   ├── tests/             71 pytest tests covering all modules
+│   └── config.py           Settings & env vars
 ├── frontend/
 │   └── src/
-│       ├── pages/        Dashboard, Simulation, Strategies views
-│       ├── components/   Charts, tables, account bar widgets
-│       └── api/          HTTP + WebSocket client
-└── PLAN.md               Full architecture & build phases
+│       ├── pages/         Dashboard, Live, Backtest, Strategies
+│       ├── components/    AccountSummary, Clock, PortfolioChart,
+│       │                  PositionsTable, OrderHistory, StrategySelector
+│       ├── api/           HTTP + WebSocket client (BacktestSocket, LiveSocket)
+│       └── theme/         ThemeContext (dark/light mode)
+├── pyproject.toml          Pytest asyncio config
+├── AGENTS.md               Agent instructions
+└── PLAN.md                 Full architecture & build phases
 ```
 
 ## Setup
@@ -60,8 +74,8 @@ cd frontend && npm install && cd ..
 
 ### Configuration (optional)
 
-Copy `.env.example` to `.env` and fill in your Alpaca API keys for real market data.
-The app works without it — it will tell you when Alpaca data isn't available.
+Copy `.env.example` to `.env` and fill in your Alpaca API keys for real market data and live trading.
+The app works without it — it will use synthetic data when Alpaca is unavailable.
 
 ```bash
 cp .env.example .env
@@ -93,20 +107,22 @@ cd frontend && npm test
 
 | Page | What it does |
 |---|---|
-| **Dashboard** | See your account summary, holdings, order history, and equity chart |
-| **Simulation** | Pick a strategy + stock + date range, run a simulation with buy/sell markers on the chart, replay past runs, clear history |
-| **Strategies** | Browse available strategies and their settings |
+| **Dashboard** | See your Alpaca account summary, positions, order history, and portfolio equity chart |
+| **Backtest** | Pick a strategy + symbols + date range + cash amount, run a backtest with streaming buy/sell markers. Supports multi-symbol, dividend handling, and intraday timeframes. Replay or clear past runs |
+| **Live** | Run a strategy live on Alpaca paper trading — select strategy, symbols, and timeframe; start/stop via WebSocket |
+| **Strategies** | Browse available strategies and their configurable parameters |
 
-### Simulation tips
-- Pick a **start date** — it runs through the last full month automatically
+### Backtest tips
+- Pick a **start date** — it runs through the last full trading day automatically
 - Enter a **starting amount** (like $100)
-- Click **Run Simulation** — watch the chart and buy/sell markers animate in real time
+- Select one or more **symbols** (NVDA, AMD, VOO, SPY, META)
+- Click **Run** — watch the chart and buy/sell markers stream in real time
 
 ## Build Progress
 
 - [x] Phase 1: Foundation — SQLite schema, Alpaca data loader, config
-- [x] Phase 2: Custom Simulation Engine — bar-by-bar simulation, P&L tracking, equity curves, metrics
-- [x] Phase 3: Backend API + WebSocket — REST endpoints for portfolio/holdings/orders/simulation, WebSocket for real-time simulation streaming, strategy registry
-- [x] Phase 4: React Frontend Dashboard — 3 pages (Dashboard, Simulation, Strategies), 5 widgets, WebSocket streaming with buy/sell markers, fractional shares, 34 frontend tests
-- [ ] Phase 5: Live Trading Engine
+- [x] Phase 2: Custom Backtest Engine — bar-by-bar simulation, P&L tracking, equity curves, metrics
+- [x] Phase 3: Backend API + WebSocket — REST endpoints, WebSocket streaming, strategy registry
+- [x] Phase 4: React Frontend Dashboard — 4 pages, 6 widgets, WebSocket streaming, buy/sell markers, theme toggle, 34 frontend tests
+- [x] Phase 5: Live Trading Engine — Alpaca live execution, market-open detection, WebSocket streaming, Live UI page
 - [ ] Phase 6: Strategy building & tuning
