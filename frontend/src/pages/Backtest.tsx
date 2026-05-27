@@ -71,6 +71,11 @@ export default function Backtest() {
 
   const addLog = (msg: string) => setLog((prev) => [...prev, msg]);
 
+  const clearRuns = async () => {
+    await api.clearBacktestRuns();
+    setPastRuns([]);
+  };
+
   const runBacktest = useCallback(async () => {
     setRunning(true);
     setEquityPoints([]);
@@ -242,7 +247,25 @@ export default function Backtest() {
           </button>
 
           <div style={{ marginTop: 24 }}>
-            <h4 style={{ margin: "0 0 8px" }}>Previous Runs</h4>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+              <h4 style={{ margin: 0 }}>Previous Runs</h4>
+              {pastRuns.length > 0 && (
+                <button
+                  onClick={clearRuns}
+                  style={{
+                    padding: "2px 10px",
+                    background: "#c5221f",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
             {pastRuns.length === 0 ? (
               <p style={{ fontSize: 13, color: "#777" }}>No runs yet</p>
             ) : (

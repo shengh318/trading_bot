@@ -166,6 +166,12 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def delete_backtest_runs(self) -> None:
+        self.conn.execute("DELETE FROM backtest_trades")
+        self.conn.execute("DELETE FROM backtest_snapshots")
+        self.conn.execute("DELETE FROM backtest_runs")
+        self.conn.commit()
+
     def save_backtest_trades(self, run_id: int, trades: list[dict]) -> None:
         self.conn.executemany(
             """INSERT INTO backtest_trades (run_id, bar_index, timestamp, symbol, side, qty, price, pnl)

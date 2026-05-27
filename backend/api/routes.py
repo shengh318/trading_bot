@@ -84,6 +84,13 @@ def get_backtest_equity(run_id: int):
     return db.get_backtest_snapshots(run_id)
 
 
+@router.delete("/api/backtest/runs")
+def delete_backtest_runs():
+    db = get_db()
+    db.delete_backtest_runs()
+    return {"status": "ok"}
+
+
 @router.post("/api/backtest/run", response_model=BacktestRunResponse)
 def run_backtest(req: BacktestRunRequest):
     db = get_db()
