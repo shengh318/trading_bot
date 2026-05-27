@@ -89,6 +89,6 @@ All tests use `pytest` with isolated databases per test via the `api_db` fixture
 - [x] Phase 1: Foundation — SQLite schema, Alpaca data loader, config
 - [x] Phase 2: Custom Backtest Engine — bar-by-bar simulation, P&L tracking, equity curves, metrics
 - [x] Phase 3: Backend API + WebSocket — REST endpoints for portfolio/positions/orders/backtest, WebSocket for real-time backtest streaming, strategy registry
-- [ ] Phase 4: React Frontend Dashboard
+- [x] Phase 4: React Frontend Dashboard — 3 pages (Dashboard, Backtest, Strategies), 5 widgets, WebSocket streaming, 34 frontend tests
 - [ ] Phase 5: Live Trading Engine
 - [ ] Phase 6: Strategy building & tuning
