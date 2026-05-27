@@ -5,7 +5,7 @@ import PositionsTable from "./PositionsTable";
 describe("PositionsTable", () => {
   it("shows empty state", () => {
     render(<PositionsTable positions={[]} />);
-    expect(screen.getByText("No positions")).toBeDefined();
+    expect(screen.getByText("No holdings")).toBeDefined();
   });
 
   it("renders position rows", () => {

@@ -48,7 +48,7 @@ describe("App", () => {
   it("defaults to Dashboard tab", async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText("No positions")).toBeDefined();
+      expect(screen.getByText("No holdings")).toBeDefined();
     });
   });
 
@@ -56,7 +56,7 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(screen.getByText("Backtest"));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Run Backtest" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Run Simulation" })).toBeDefined();
     });
   });
 

@@ -49,7 +49,7 @@ class BacktestEngine:
             signal = self.strategy.next(i, self.data, self.portfolio)
 
             if signal == Signal.BUY and self.portfolio.cash > 0:
-                qty = self.portfolio.cash // price
+                qty = self.portfolio.cash / price
                 if qty > 0:
                     cost = qty * price
                     existing_shares = self.portfolio.positions.get(self.symbol, 0)
@@ -128,7 +128,7 @@ class BacktestEngine:
             event_trade = None
 
             if signal == Signal.BUY and self.portfolio.cash > 0:
-                qty = self.portfolio.cash // price
+                qty = self.portfolio.cash / price
                 if qty > 0:
                     cost = qty * price
                     existing_shares = self.portfolio.positions.get(self.symbol, 0)

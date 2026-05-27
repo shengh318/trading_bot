@@ -43,7 +43,7 @@ export interface BacktestRunRequest {
   strategy_name: string;
   symbol: string;
   start_date: string;
-  end_date: string;
+  end_date?: string;
   initial_cash: number;
   parameters?: Record<string, unknown>;
 }

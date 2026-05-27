@@ -25,8 +25,7 @@ export default function Backtest() {
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [symbol, setSymbol] = useState("AAPL");
   const [startDate, setStartDate] = useState("2024-01-01");
-  const [endDate, setEndDate] = useState("2024-06-01");
-  const [initialCash, setInitialCash] = useState(10000);
+  const [initialCash, setInitialCash] = useState("100");
   const [running, setRunning] = useState(false);
   const [pastRuns, setPastRuns] = useState<BacktestRun[]>([]);
   const [equityPoints, setEquityPoints] = useState<{ time: import("lightweight-charts").Time; value: number }[]>([]);
@@ -34,6 +33,11 @@ export default function Backtest() {
   const [metrics, setMetrics] = useState<BacktestMetrics | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const wsRef = useRef<ReturnType<typeof api.createBacktestSocket> | null>(null);
+
+  const markers = trades.map((t) => ({
+    time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+    side: t.side as "buy" | "sell",
+  }));
 
   useEffect(() => {
     api.getStrategies().then((list) => {
@@ -97,7 +101,7 @@ export default function Backtest() {
         onComplete: (event) => {
           setMetrics((event.metrics?.metrics as BacktestMetrics) ?? EMPTY_METRICS);
           setRunning(false);
-          addLog("Backtest complete!");
+          addLog("Simulation complete!");
           api.getBacktestRuns().then(setPastRuns);
         },
         onError: (message) => {
@@ -111,15 +115,14 @@ export default function Backtest() {
         strategy_name: selectedStrategy,
         symbol,
         start_date: startDate,
-        end_date: endDate,
-        initial_cash: initialCash,
+        initial_cash: Number(initialCash),
         parameters: params,
       });
     } catch {
       addLog("Failed to connect to WebSocket");
       setRunning(false);
     }
-  }, [selectedStrategy, symbol, startDate, endDate, initialCash, params]);
+  }, [selectedStrategy, symbol, startDate, initialCash, params]);
 
   const replayRun = useCallback(async (runId: number) => {
     setRunning(true);
@@ -180,7 +183,7 @@ export default function Backtest() {
     <div>
       <div style={{ display: "flex", gap: 24 }}>
         <div style={{ flex: 1 }}>
-          <h3 style={{ margin: "0 0 12px" }}>Run Backtest</h3>
+          <h3 style={{ margin: "0 0 12px" }}>Run Simulation</h3>
           <StrategySelector
             strategies={strategies}
             selected={selectedStrategy}
@@ -207,23 +210,18 @@ export default function Backtest() {
               style={{ padding: "4px 8px", fontSize: 14 }}
             />
           </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={{ marginRight: 8, fontWeight: 600 }}>End:</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              style={{ padding: "4px 8px", fontSize: 14 }}
-            />
-          </div>
           <div style={{ marginBottom: 16 }}>
             <label style={{ marginRight: 8, fontWeight: 600 }}>
-              Initial Cash:
+              Starting Amount ($):
             </label>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               value={initialCash}
-              onChange={(e) => setInitialCash(Number(e.target.value))}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || /^\d+(\.\d*)?$/.test(v)) setInitialCash(v);
+              }}
               style={{ padding: "4px 8px", fontSize: 14, width: 120 }}
             />
           </div>
@@ -240,7 +238,7 @@ export default function Backtest() {
               fontWeight: 600,
             }}
           >
-            {running ? "Running..." : "Run Backtest"}
+            {running ? "Running..." : "Run Simulation"}
           </button>
 
           <div style={{ marginTop: 24 }}>
@@ -294,7 +292,7 @@ export default function Backtest() {
         </div>
 
         <div style={{ flex: 2 }}>
-          <PortfolioChart data={equityPoints} />
+          <PortfolioChart data={equityPoints} markers={equityPoints.length > 0 ? markers : undefined} />
 
           {metrics && (
             <div
@@ -313,19 +311,19 @@ export default function Backtest() {
                 </div>
               </div>
               <div style={metricStyle}>
-                <strong>Final Equity</strong>
+                <strong>Final Value</strong>
                 <div>${metrics.final_equity.toFixed(2)}</div>
               </div>
               <div style={metricStyle}>
-                <strong>Sharpe</strong>
+                <strong>Risk Score</strong>
                 <div>{metrics.sharpe_ratio.toFixed(2)}</div>
               </div>
               <div style={metricStyle}>
-                <strong>Max DD</strong>
+                <strong>Drop</strong>
                 <div style={{ color: "#c5221f" }}>{metrics.max_drawdown_pct.toFixed(2)}%</div>
               </div>
               <div style={metricStyle}>
-                <strong>Win Rate</strong>
+                <strong>Win %</strong>
                 <div>{metrics.win_rate_pct.toFixed(1)}%</div>
               </div>
               <div style={metricStyle}>
@@ -333,7 +331,7 @@ export default function Backtest() {
                 <div>{metrics.num_trades}</div>
               </div>
               <div style={metricStyle}>
-                <strong>Profit Factor</strong>
+                <strong>Profit Ratio</strong>
                 <div>
                   {metrics.profit_factor === Infinity
                     ? "∞"
@@ -345,22 +343,22 @@ export default function Backtest() {
 
           <div style={{ display: "flex", gap: 24 }}>
             <div style={{ flex: 1 }}>
-              <h4 style={{ margin: "0 0 8px" }}>Trades</h4>
+              <h4 style={{ margin: "0 0 8px" }}>Actions</h4>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Bar</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Side</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Action</th>
                     <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Qty</th>
                     <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Price</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>P&L</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd" }}>Profit/Loss</th>
                   </tr>
                 </thead>
                 <tbody>
                   {trades.length === 0 ? (
                     <tr>
                       <td colSpan={5} style={{ padding: "4px 8px", color: "#777" }}>
-                        No trades
+                        No actions yet
                       </td>
                     </tr>
                   ) : (

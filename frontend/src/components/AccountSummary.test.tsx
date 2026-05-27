@@ -22,6 +22,8 @@ describe("AccountSummary", () => {
     expect(screen.getByText("$5000.00")).toBeDefined();
     expect(screen.getByText("$15000.00")).toBeDefined();
     expect(screen.getByText("$10000.00")).toBeDefined();
+    expect(screen.getByText("Purchasing Power")).toBeDefined();
+    expect(screen.getByText("Today's Profit/Loss")).toBeDefined();
     expect(screen.getByText("+$250.50")).toBeDefined();
   });
 

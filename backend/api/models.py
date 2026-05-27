@@ -48,7 +48,7 @@ class BacktestRunRequest(BaseModel):
     strategy_name: str
     symbol: str
     start_date: str
-    end_date: str
+    end_date: Optional[str] = None
     initial_cash: float = 10000.0
     parameters: Optional[dict[str, Any]] = None
 

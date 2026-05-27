@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
@@ -95,10 +95,11 @@ def run_backtest(req: BacktestRunRequest):
 
     try:
         loader = DataLoader()
+        end = datetime.fromisoformat(req.end_date) if req.end_date else datetime.now(timezone.utc)
         df = loader.load_bars(
             symbol=req.symbol,
             start=datetime.fromisoformat(req.start_date),
-            end=datetime.fromisoformat(req.end_date),
+            end=end,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to load data: {e}")
@@ -114,7 +115,7 @@ def run_backtest(req: BacktestRunRequest):
         "parameters": str(req.parameters) if req.parameters else None,
         "symbol": req.symbol,
         "start_date": req.start_date,
-        "end_date": req.end_date,
+        "end_date": req.end_date or end.date().isoformat(),
         "initial_cash": req.initial_cash,
         "final_equity": metrics["final_equity"],
         "total_return": metrics["total_return_pct"],

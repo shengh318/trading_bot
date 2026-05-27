@@ -21,23 +21,23 @@ const headerStyle: React.CSSProperties = {
 export default function PositionsTable({ positions }: Props) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <h3 style={{ margin: "0 0 8px" }}>Positions</h3>
+      <h3 style={{ margin: "0 0 8px" }}>Holdings</h3>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
             <th style={headerStyle}>Symbol</th>
             <th style={headerStyle}>Qty</th>
-            <th style={headerStyle}>Avg Entry</th>
+            <th style={headerStyle}>Avg Buy Price</th>
             <th style={headerStyle}>Current</th>
-            <th style={headerStyle}>P&L</th>
-            <th style={headerStyle}>Market Value</th>
+            <th style={headerStyle}>Profit/Loss</th>
+            <th style={headerStyle}>Current Value</th>
           </tr>
         </thead>
         <tbody>
           {positions.length === 0 ? (
             <tr>
               <td style={cellStyle} colSpan={6}>
-                No positions
+                No holdings
               </td>
             </tr>
           ) : (

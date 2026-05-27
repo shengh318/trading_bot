@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -42,10 +42,11 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
     strategy = get_strategy(data["strategy_name"], data.get("parameters"))
 
     loader = DataLoader()
+    end = datetime.fromisoformat(data["end_date"]) if data.get("end_date") else datetime.now(timezone.utc)
     df = loader.load_bars(
         symbol=data["symbol"],
         start=datetime.fromisoformat(data["start_date"]),
-        end=datetime.fromisoformat(data["end_date"]),
+        end=end,
     )
 
     engine = BacktestEngine(
@@ -79,7 +80,7 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
         "parameters": json.dumps(data.get("parameters")),
         "symbol": data["symbol"],
         "start_date": data["start_date"],
-        "end_date": data["end_date"],
+        "end_date": data.get("end_date") or end.date().isoformat(),
         "initial_cash": float(data.get("initial_cash", 10000)),
     })
 

@@ -1,17 +1,23 @@
 import { useEffect, useRef } from "react";
-import { createChart, ColorType, type IChartApi, type ISeriesApi, type AreaSeriesPartialOptions, type Time } from "lightweight-charts";
+import { createChart, ColorType, type IChartApi, type ISeriesApi, type SeriesMarker, type AreaSeriesPartialOptions, type Time } from "lightweight-charts";
 
 interface Point {
   time: Time;
   value: number;
 }
 
+interface Marker {
+  time: Time;
+  side: "buy" | "sell";
+}
+
 interface Props {
   data: Point[];
+  markers?: Marker[];
   height?: number;
 }
 
-export default function PortfolioChart({ data, height = 350 }: Props) {
+export default function PortfolioChart({ data, markers = [], height = 350 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
@@ -50,8 +56,16 @@ export default function PortfolioChart({ data, height = 350 }: Props) {
   useEffect(() => {
     if (seriesRef.current && data.length > 0) {
       seriesRef.current.setData(data);
+      const chartMarkers: SeriesMarker<Time>[] = markers.map((m) => ({
+        time: m.time,
+        position: m.side === "buy" ? "belowBar" : "aboveBar",
+        shape: m.side === "buy" ? "arrowUp" : "arrowDown",
+        color: m.side === "buy" ? "#0b8043" : "#c5221f",
+        size: 1,
+      }));
+      seriesRef.current.setMarkers(chartMarkers);
     }
-  }, [data]);
+  }, [data, markers]);
 
   return <div ref={containerRef} style={{ width: "100%", marginBottom: 16 }} />;
 }

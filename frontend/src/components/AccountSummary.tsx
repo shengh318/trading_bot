@@ -27,11 +27,11 @@ export default function AccountSummary({ summary }: Props) {
         <div>{`$${summary.portfolio_value.toFixed(2)}`}</div>
       </div>
       <div>
-        <strong>Buying Power</strong>
+        <strong>Purchasing Power</strong>
         <div>{`$${summary.buying_power.toFixed(2)}`}</div>
       </div>
       <div>
-        <strong>Day P&L</strong>
+        <strong>Today's Profit/Loss</strong>
         <div
           style={{
             color: summary.day_pnl >= 0 ? "#0b8043" : "#c5221f",
