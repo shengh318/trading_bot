@@ -154,7 +154,9 @@ async def _handle_replay(websocket: WebSocket, run_id: int) -> None:
         await websocket.send_json({"type": "error", "message": f"Run {run_id} not found"})
         return
 
-    trade_map = {t["bar_index"]: t for t in trades}
+    trades_by_bar: dict[int, list[dict]] = {}
+    for t in trades:
+        trades_by_bar.setdefault(t["bar_index"], []).append(t)
 
     for snap in snapshots:
         await websocket.send_json({
@@ -163,8 +165,7 @@ async def _handle_replay(websocket: WebSocket, run_id: int) -> None:
             "timestamp": snap["timestamp"],
             "equity": snap["equity"],
             "cash": snap["cash"],
-            "signal": "",
-            "trade": trade_map.get(snap["bar_index"]),
+            "trades": trades_by_bar.get(snap["bar_index"], []),
         })
 
     run_row = db.get_backtest_run_by_id(run_id)

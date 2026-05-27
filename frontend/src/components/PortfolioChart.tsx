@@ -85,7 +85,12 @@ export default function PortfolioChart({ data, markers = [], height = 350, initi
   }, [height, colors, initialCash]);
 
   useEffect(() => {
-    if (!seriesRef.current || data.length === 0) return;
+    if (!seriesRef.current) return;
+    if (data.length === 0) {
+      seriesRef.current.setData([]);
+      seriesRef.current.setMarkers([]);
+      return;
+    }
     seriesRef.current.setData(data);
     const chartMarkers: SeriesMarker<Time>[] = markers.map((m) => ({
       time: m.time,

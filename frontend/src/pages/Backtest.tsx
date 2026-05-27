@@ -37,6 +37,7 @@ export default function Backtest() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [metrics, setMetrics] = useState<BacktestMetrics | null>(null);
   const [log, setLog] = useState<string[]>([]);
+  const [currentRunId, setCurrentRunId] = useState<number | null>(null);
   const wsRef = useRef<ReturnType<typeof api.createBacktestSocket> | null>(null);
 
   const markers = trades.map((t) => ({
@@ -86,6 +87,23 @@ export default function Backtest() {
   const clearRuns = async () => {
     await api.clearBacktestRuns();
     setPastRuns([]);
+    setEquityPoints([]);
+    setTrades([]);
+    setLog([]);
+    setMetrics(null);
+    setCurrentRunId(null);
+  };
+
+  const deleteRun = async (runId: number) => {
+    await api.deleteBacktestRun(runId);
+    setPastRuns((prev) => prev.filter((r) => r.id !== runId));
+    if (currentRunId === runId) {
+      setEquityPoints([]);
+      setTrades([]);
+      setLog([]);
+      setMetrics(null);
+      setCurrentRunId(null);
+    }
   };
 
   const runBacktest = useCallback(async () => {
@@ -94,6 +112,7 @@ export default function Backtest() {
     setTrades([]);
     setMetrics(null);
     setLog([]);
+    setCurrentRunId(null);
 
     const ws = api.createBacktestSocket();
     wsRef.current = ws;
@@ -119,6 +138,7 @@ export default function Backtest() {
           setMetrics(event.metrics ?? EMPTY_METRICS);
           setRunning(false);
           addLog("Simulation complete!");
+          setCurrentRunId(event.run_id);
           api.getBacktestRuns().then(setPastRuns);
         },
         onError: (message) => {
@@ -139,6 +159,7 @@ export default function Backtest() {
     } catch {
       addLog("Failed to connect to WebSocket");
       setRunning(false);
+      setCurrentRunId(null);
     }
   }, [selectedStrategy, selectedSymbols, startDate, initialCash, params, timeframe]);
 
@@ -148,13 +169,14 @@ export default function Backtest() {
     setTrades([]);
     setMetrics(null);
     setLog([]);
+    setCurrentRunId(runId);
 
     const ws = api.createBacktestSocket();
     wsRef.current = ws;
 
     try {
       await ws.connect({
-        onBar: (event) => {
+          onBar: (event) => {
           setEquityPoints((prev) => [
             ...prev,
             {
@@ -164,6 +186,9 @@ export default function Backtest() {
           ]);
           for (const trade of event.trades) {
             setTrades((prev) => [...prev, trade]);
+            addLog(
+              `${trade.side.toUpperCase()} ${Number.isInteger(trade.qty) ? trade.qty : trade.qty.toFixed(4)} ${trade.symbol} @ $${trade.price.toFixed(2)}`,
+            );
           }
         },
         onComplete: (event) => {
@@ -174,6 +199,7 @@ export default function Backtest() {
         onError: (message) => {
           addLog(`Error: ${message}`);
           setRunning(false);
+          setCurrentRunId(null);
         },
       });
 
@@ -181,6 +207,7 @@ export default function Backtest() {
     } catch {
       addLog("Failed to connect to WebSocket");
       setRunning(false);
+      setCurrentRunId(null);
     }
   }, []);
 
@@ -332,7 +359,7 @@ export default function Backtest() {
                           ? `${r.metrics.total_return_pct >= 0 ? "+" : ""}${r.metrics.total_return_pct.toFixed(2)}%`
                           : "-"}
                       </td>
-                      <td style={{ padding: "4px 8px" }}>
+                       <td style={{ padding: "4px 8px", display: "flex", gap: 4 }}>
                         <button
                           onClick={() => replayRun(r.id)}
                           disabled={running}
@@ -347,6 +374,21 @@ export default function Backtest() {
                           }}
                         >
                           Replay
+                        </button>
+                        <button
+                          onClick={() => deleteRun(r.id)}
+                          style={{
+                            padding: "2px 8px",
+                            background: "transparent",
+                            color: colors.negative,
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            lineHeight: 1,
+                          }}
+                          title="Delete run"
+                        >
+                          ✕
                         </button>
                       </td>
                     </tr>
@@ -408,8 +450,9 @@ export default function Backtest() {
           )}
 
           <div style={{ display: "flex", gap: 24 }}>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
               <h4 style={{ margin: "0 0 8px" }}>Actions</h4>
+              <div style={{ maxHeight: 300, overflowY: "auto", border: `1px solid ${colors.border}`, borderRadius: 6 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr>
@@ -454,6 +497,7 @@ export default function Backtest() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
             <div style={{ flex: 1 }}>
               <h4 style={{ margin: "0 0 8px" }}>Log</h4>

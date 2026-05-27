@@ -15,14 +15,14 @@ _REGISTRY: dict[str, dict] = {
     },
     "Simple Strat 1": {
         "class": SimpleStrat1,
-        "description": "Mean reversion with DCA. Buys fixed $ amount when price drops from the day's open, sells a portion on green days, with stop loss.",
+        "description": "Mean reversion with DCA. Buys fixed $ amount when price drops from the day's open, sells entire position on green days, with stop loss.",
         "params": [
-            {"name": "buy_size", "type": "float", "default": 10.0},
+            {"name": "buy_size", "type": "float", "default": 100.0},
             {"name": "entry_drop", "type": "float", "default": 1.0},
-            {"name": "profit_target", "type": "float", "default": 1.0},
-            {"name": "sell_portion", "type": "float", "default": 20.0},
-            {"name": "stop_loss", "type": "float", "default": 5.0},
-            {"name": "max_buys", "type": "int", "default": 5},
+            {"name": "profit_target", "type": "float", "default": 20.0},
+            {"name": "sell_portion", "type": "float", "default": 100.0},
+            {"name": "stop_loss", "type": "float", "default": 3.0},
+            {"name": "max_buys", "type": "int", "default": 1},
         ],
     },
 }

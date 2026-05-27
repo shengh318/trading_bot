@@ -2,10 +2,20 @@
 
 ## Commands
 
+### Windows (PowerShell)
+- **Activate venv**: `.venv\Scripts\Activate.ps1`
+- **Run backend**: `.venv\Scripts\uvicorn backend.api.main:app --reload`
+- **Run frontend**: `cd frontend; npm run dev`
+- **Install backend deps**: `.venv\Scripts\pip install -r backend\requirements.txt`
+- **Install frontend deps**: `cd frontend; npm install`
+- **Check types**: `cd frontend; npx tsc --noEmit`
+- **Lint**: `cd frontend; npx eslint src/`
+
+### macOS / Linux
 - **Activate venv**: `source .venv/bin/activate`
 - **Run backend**: `.venv/bin/uvicorn backend.api.main:app --reload`
 - **Run frontend**: `cd frontend && npm run dev`
-- **Install backend deps**: `pip install -r backend/requirements.txt`
+- **Install backend deps**: `.venv/bin/pip install -r backend/requirements.txt`
 - **Install frontend deps**: `cd frontend && npm install`
 - **Check types**: `cd frontend && npx tsc --noEmit`
 - **Lint**: `cd frontend && npx eslint src/`

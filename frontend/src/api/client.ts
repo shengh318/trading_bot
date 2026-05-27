@@ -181,6 +181,10 @@ export class ApiClient {
     await fetch(`${this.base}/api/backtest/runs`, { method: "DELETE" });
   }
 
+  async deleteBacktestRun(id: number): Promise<void> {
+    await fetch(`${this.base}/api/backtest/runs/${id}`, { method: "DELETE" });
+  }
+
   createBacktestSocket(): BacktestSocket {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${location.host}/ws/backtest`;

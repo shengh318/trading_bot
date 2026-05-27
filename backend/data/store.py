@@ -180,11 +180,19 @@ class Database:
         ).fetchone()
         return dict(row) if row else None
 
+    def delete_backtest_run(self, run_id: int) -> None:
+        self.conn.execute("DELETE FROM backtest_trades WHERE run_id = ?", (run_id,))
+        self.conn.execute("DELETE FROM backtest_snapshots WHERE run_id = ?", (run_id,))
+        self.conn.execute("DELETE FROM backtest_runs WHERE id = ?", (run_id,))
+        self.conn.commit()
+
     def delete_backtest_runs(self) -> None:
         self.conn.execute("DELETE FROM backtest_trades")
         self.conn.execute("DELETE FROM backtest_snapshots")
         self.conn.execute("DELETE FROM backtest_runs")
+        self.conn.execute("DELETE FROM sqlite_sequence WHERE name='backtest_runs'")
         self.conn.commit()
+        self.conn.execute("VACUUM")
 
     def save_backtest_trades(self, run_id: int, trades: list[dict]) -> None:
         self.conn.executemany(

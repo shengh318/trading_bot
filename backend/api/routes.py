@@ -91,6 +91,12 @@ def delete_backtest_runs():
     db.delete_backtest_runs()
     return {"status": "ok"}
 
+@router.delete("/api/backtest/runs/{run_id}")
+def delete_backtest_run(run_id: int):
+    db = get_db()
+    db.delete_backtest_run(run_id)
+    return {"status": "ok"}
+
 
 @router.post("/api/backtest/run", response_model=BacktestRunResponse)
 def run_backtest(req: BacktestRunRequest):

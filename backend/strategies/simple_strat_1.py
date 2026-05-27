@@ -6,12 +6,12 @@ from backend.strategies.base import Strategy, Signal, Portfolio
 class SimpleStrat1(Strategy):
     def __init__(
         self,
-        buy_size: float = 10.0,
+        buy_size: float = 100.0,
         entry_drop: float = 1.0,
-        profit_target: float = 1.0,
-        sell_portion: float = 20.0,
-        stop_loss: float = 5.0,
-        max_buys: int = 5,
+        profit_target: float = 20.0,
+        sell_portion: float = 100.0,
+        stop_loss: float = 3.0,
+        max_buys: int = 1,
     ):
         self.buy_size = buy_size
         self.entry_drop = entry_drop
