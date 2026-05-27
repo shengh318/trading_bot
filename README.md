@@ -24,7 +24,10 @@ trader/
 │   ├── engine/           Live/paper trading loop
 │   ├── strategies/       Strategy base class + implementations
 │   ├── backtest/         Custom backtest engine + metrics
+│   │   ├── engine.py     Bar-by-bar simulation
+│   │   └── metrics.py    Sharpe, drawdown, win rate, etc.
 │   ├── data/             Alpaca data loader & SQLite store
+│   ├── tests/            Pytest test suite
 │   └── config.py         Settings & env vars
 ├── frontend/
 │   └── src/
@@ -74,7 +77,7 @@ cd frontend && npm run dev
 ## Build Progress
 
 - [x] Phase 1: Foundation — SQLite schema, Alpaca data loader, config
-- [ ] Phase 2: Custom Backtest Engine
+- [x] Phase 2: Custom Backtest Engine — bar-by-bar simulation, P&L tracking, equity curves, Sharpe/max DD/win rate/profit factor
 - [ ] Phase 3: Backend API + WebSocket
 - [ ] Phase 4: React Frontend Dashboard
 - [ ] Phase 5: Live Trading Engine
