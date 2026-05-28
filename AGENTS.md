@@ -10,6 +10,9 @@
 - **Install frontend deps**: `cd frontend; npm install`
 - **Check types**: `cd frontend; npx tsc --noEmit`
 - **Lint**: `cd frontend; npx eslint src/`
+- **Train ML model**: `.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20`
+- **Train with grid search (auto-find best params)**: `.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --grid-search`
+- **Train + only save if it beats baselines**: `.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --beat-baselines`
 
 ### macOS / Linux
 - **Activate venv**: `source .venv/bin/activate`
@@ -19,6 +22,9 @@
 - **Install frontend deps**: `cd frontend && npm install`
 - **Check types**: `cd frontend && npx tsc --noEmit`
 - **Lint**: `cd frontend && npx eslint src/`
+- **Train ML model**: `.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20`
+- **Train with grid search**: `.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --grid-search`
+- **Train + beat baselines**: `.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --beat-baselines`
 
 ## Architecture Quick Reference
 
@@ -28,6 +34,8 @@
 - **Backtest engine**: `backend/backtest/engine.py`, streams via WebSocket
 - **DB**: SQLite (auto-created on first run)
 - **Broker**: Alpaca (keys in `.env`)
+- **ML training**: `backend/ml/train.py` — CLI script, uses yfinance data, saves models to `backend/ml/models/`
+- **ML strategy**: `MLStrategy` — loads pre-trained model from disk, uses 24 technical indicator features
 
 ## Conventions
 

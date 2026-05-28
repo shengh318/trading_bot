@@ -1,10 +1,20 @@
 from typing import Any, Optional
 
 from backend.strategies.base import Strategy
+from backend.strategies.ml_strategy import MLStrategy
 from backend.strategies.sma_crossover import SmaCrossover
 from backend.strategies.simple_strat_1 import SimpleStrat1
 
 _REGISTRY: dict[str, dict] = {
+    "ML Strategy": {
+        "class": MLStrategy,
+        "description": "Pre-trained ML model (RandomForest/GradientBoosting) loaded from disk. Predicts next-bar direction from 24 technical indicators. Use --beat-baselines during training to ensure it outperforms SmaCrossover and SimpleStrat 1.",
+        "params": [
+            {"name": "model_name", "type": "str", "default": "multi_symbol_model"},
+            {"name": "confidence_threshold", "type": "float", "default": 0.55},
+            {"name": "base_buy_size", "type": "float", "default": 1000.0},
+        ],
+    },
     "SmaCrossover": {
         "class": SmaCrossover,
         "description": "Buy when short SMA crosses above long SMA, sell when it crosses below.",
