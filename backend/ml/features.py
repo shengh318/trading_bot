@@ -6,6 +6,21 @@ import pandas as pd
 EXCLUDED_COLUMNS = {"open", "high", "low", "close", "volume", "trade_count", "vwap", "symbol", "target"}
 
 
+def _hurst_exponent(ts: np.ndarray) -> float:
+    """Compute Hurst exponent via rescaled range (R/S) method."""
+    if len(ts) < 20:
+        return 0.5
+    ts = np.asarray(ts, dtype=float)
+    mean = np.nanmean(ts)
+    deviations = ts - mean
+    cumsum = np.nancumsum(deviations)
+    r = np.nanmax(cumsum) - np.nanmin(cumsum)
+    s = np.nanstd(ts)
+    if s <= 0 or r <= 0:
+        return 0.5
+    return np.log(r / s) / np.log(len(ts))
+
+
 def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     """Add technical indicator feature columns to the DataFrame.
 
@@ -89,6 +104,83 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     data["mom_10"] = close.pct_change(10)
     data["mom_20"] = close.pct_change(20)
     data["mom_60"] = close.pct_change(60)
+
+    # ── New features ────────────────────────────────────────────────────────
+
+    # --- Bollinger Bands (20,2) ---
+    bb_mid = close.rolling(20).mean()
+    bb_std = close.rolling(20).std()
+    bb_upper = bb_mid + 2 * bb_std
+    bb_lower = bb_mid - 2 * bb_std
+    data["bb_width"] = (bb_upper - bb_lower) / bb_mid.replace(0, np.nan)
+    bb_range = (bb_upper - bb_lower).replace(0, np.nan)
+    data["bb_pct_b"] = (close - bb_lower) / bb_range
+
+    # --- ADX (Average Directional Index, 14-period) ---
+    high_lag = high.shift(1)
+    low_lag = low.shift(1)
+    up_move = high - high_lag
+    down_move = low_lag - low
+    plus_dm = pd.Series(
+        np.where((up_move > down_move) & (up_move > 0), up_move, 0),
+        index=data.index,
+    )
+    minus_dm = pd.Series(
+        np.where((down_move > up_move) & (down_move > 0), down_move, 0),
+        index=data.index,
+    )
+    tr_adx = pd.concat([
+        high - low,
+        (high - low_lag).abs(),
+        (low - low_lag).abs(),
+    ], axis=1).max(axis=1)
+    alpha = 1 / 14
+    s_plus_dm = plus_dm.ewm(alpha=alpha, adjust=False).mean()
+    s_minus_dm = minus_dm.ewm(alpha=alpha, adjust=False).mean()
+    s_tr = tr_adx.ewm(alpha=alpha, adjust=False).mean()
+    plus_di = 100 * s_plus_dm / s_tr.replace(0, np.nan)
+    minus_di = 100 * s_minus_dm / s_tr.replace(0, np.nan)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    data["adx"] = dx.rolling(14).mean()
+    data["plus_di"] = plus_di
+    data["minus_di"] = minus_di
+
+    # --- OBV (normalized as ratio to 20-bar average) ---
+    obv = (volume * np.sign(close.diff())).fillna(0).cumsum()
+    obv_ma = obv.rolling(20).mean().replace(0, np.nan)
+    data["obv_ratio"] = obv / obv_ma
+
+    # --- MFI (Money Flow Index, 14-period) ---
+    typical_price = (high + low + close) / 3
+    raw_mf = typical_price * volume
+    pos_mf = raw_mf.where(typical_price > typical_price.shift(1), 0).rolling(14).sum()
+    neg_mf = raw_mf.where(typical_price < typical_price.shift(1), 0).rolling(14).sum()
+    data["mfi"] = 100 - (100 / (1 + pos_mf / neg_mf.replace(0, np.nan)))
+
+    # --- Lag features ---
+    data["ret_1_lag1"] = data["ret_1"].shift(1)
+    data["ret_1_lag2"] = data["ret_1"].shift(2)
+    data["ret_1_lag3"] = data["ret_1"].shift(3)
+    data["rsi_lag1"] = data["rsi"].shift(1)
+    data["vol_21_lag1"] = data["vol_21"].shift(1)
+
+    # --- Hurst exponent (50-bar window, regime indicator) ---
+    hurst = close.rolling(50, min_periods=20).apply(
+        lambda x: _hurst_exponent(x), raw=True
+    )
+    data["hurst"] = hurst.fillna(0.5)
+
+    # --- Choppiness index (14-bar) ---
+    tr_ch = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    atr_sum = tr_ch.rolling(14).sum()
+    high_max = high.rolling(14).max()
+    low_min = low.rolling(14).min()
+    h_l_range = (high_max - low_min).replace(0, np.nan)
+    data["choppiness"] = (100 * np.log10(atr_sum / h_l_range) / np.log10(14)).fillna(50)
 
     return data
 

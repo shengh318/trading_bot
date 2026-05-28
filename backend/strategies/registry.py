@@ -8,11 +8,14 @@ from backend.strategies.simple_strat_1 import SimpleStrat1
 _REGISTRY: dict[str, dict] = {
     "ML Strategy": {
         "class": MLStrategy,
-        "description": "Pre-trained ML model (RandomForest/GradientBoosting) loaded from disk. Predicts next-bar direction from 24 technical indicators. Use --beat-baselines during training to ensure it outperforms SmaCrossover and SimpleStrat 1.",
+        "description": "Pre-trained ML model (RF/GBT/XGBoost/LightGBM) loaded from disk. Predicts next-bar direction from 38 technical indicators. Params auto-loaded from model metadata (confidence threshold, Kelly) — override here if needed.",
         "params": [
             {"name": "model_name", "type": "str", "default": "multi_symbol_model"},
             {"name": "confidence_threshold", "type": "float", "default": 0.55},
             {"name": "base_buy_size", "type": "float", "default": 1000.0},
+            {"name": "use_kelly", "type": "bool", "default": False},
+            {"name": "max_hold_bars", "type": "int", "default": 30},
+            {"name": "trailing_stop_pct", "type": "float", "default": 0.05},
         ],
     },
     "SmaCrossover": {
@@ -62,6 +65,11 @@ def get_strategy(name: str, params: Optional[dict[str, Any]] = None) -> Strategy
                 resolved_params[pdef["name"]] = int(raw)
             elif pdef["type"] == "float":
                 resolved_params[pdef["name"]] = float(raw)
+            elif pdef["type"] == "bool":
+                if isinstance(raw, bool):
+                    resolved_params[pdef["name"]] = raw
+                else:
+                    resolved_params[pdef["name"]] = str(raw).lower() in ("true", "1", "yes")
             else:
                 resolved_params[pdef["name"]] = raw
     else:

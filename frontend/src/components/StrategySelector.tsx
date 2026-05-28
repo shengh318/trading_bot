@@ -47,24 +47,42 @@ export default function StrategySelector({
           {current.description}
         </p>
       )}
-      {current?.params.map((p) => (
-        <div key={p.name} style={{ marginTop: 8 }}>
-          <label style={{ marginRight: 8, fontSize: 13 }}>
-            {p.name} ({p.type}):
-          </label>
-          <input
-            type={p.type === "int" ? "number" : "text"}
-            defaultValue={(params[p.name] ?? p.default) as string | number}
-            onChange={(e) =>
-              onParamChange(
-                p.name,
-                p.type === "int" ? parseInt(e.target.value, 10) : e.target.value,
-              )
-            }
-            style={{ ...inputStyle, width: 120 }}
-          />
-        </div>
-      ))}
+      {current?.params.map((p) => {
+        if (p.type === "bool") {
+          const checked = (params[p.name] ?? p.default) === true;
+          return (
+            <div key={p.name} style={{ marginTop: 8 }}>
+              <label style={{ marginRight: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => onParamChange(p.name, e.target.checked)}
+                  style={{ marginRight: 4 }}
+                />
+                {p.name}
+              </label>
+            </div>
+          );
+        }
+        return (
+          <div key={p.name} style={{ marginTop: 8 }}>
+            <label style={{ marginRight: 8, fontSize: 13 }}>
+              {p.name} ({p.type}):
+            </label>
+            <input
+              type={p.type === "int" ? "number" : "text"}
+              defaultValue={(params[p.name] ?? p.default) as string | number}
+              onChange={(e) =>
+                onParamChange(
+                  p.name,
+                  p.type === "int" ? parseInt(e.target.value, 10) : e.target.value,
+                )
+              }
+              style={{ ...inputStyle, width: 120 }}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

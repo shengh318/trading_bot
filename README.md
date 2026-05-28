@@ -13,7 +13,7 @@ Backend (FastAPI + Python)                        ──►  API layer + simulat
   ├── Alpaca Broker API                           ──►  Market data + live order execution
   ├── Custom Backtest Engine                      ──►  Bar-by-bar simulation (single/multi symbol)
   ├── Live Trading Engine                         ──►  Real-time strategy execution on Alpaca
-  ├── ML Training Pipeline                        ──►  yfinance data → 24 features → RF/GBT model
+  ├── ML Training Pipeline                        ──►  yfinance data → 38 features → RF/GBT/XGB/LGB model
   └── SQLite                                       ──►  Trades, snapshots, backtest runs
 ```
 
@@ -38,7 +38,7 @@ trader/
 │   │   ├── simple_strat_1.py   Mean-reversion DCA strategy
 │   │   └── ml_strategy.py      ML-based strategy (loads trained model)
 │   ├── ml/                ML training pipeline
-│   │   ├── features.py    24 technical indicator feature computation
+│   │   ├── features.py    38 technical indicator feature computation
 │   │   ├── model.py       Joblib save/load + metadata helpers
 │   │   ├── train.py       CLI training script with grid search + baseline comparison
 │   │   └── models/        Saved .joblib model files
@@ -149,7 +149,7 @@ cd frontend; npm test
 
 ## ML Model Training
 
-The ML pipeline trains a Random Forest or Gradient Boosting classifier on 24 technical indicator features to predict next-bar direction. It backtests the model and compares it against SmaCrossover and SimpleStrat 1 baselines, only saving if it outperforms both.
+The ML pipeline trains a Random Forest, Gradient Boosting, XGBoost, or LightGBM classifier on 38 technical indicator features to predict future price direction (1-day or multi-day horizon). It backtests the model and compares it against SmaCrossover and SimpleStrat 1 baselines, only saving if it outperforms both.
 
 Data is sourced from **Yahoo Finance** (via `yfinance`), so **no Alpaca keys are needed** for training.
 
@@ -158,19 +158,16 @@ Data is sourced from **Yahoo Finance** (via `yfinance`), so **no Alpaca keys are
 #### Basic training
 
 ```bash
-# Windows
-.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20
-
 # macOS / Linux
 .venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20
 ```
 
-Trains both RF and GBT, prints a strategy comparison table, and saves the best model (by Sharpe ratio). No baseline gate check — saves regardless.
+Trains RF and GBT, prints a strategy comparison table, and saves the best model (by Sharpe ratio). No baseline gate check — saves regardless.
 
 #### Only save if it beats baselines
 
 ```bash
-.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --beat-baselines
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --beat-baselines
 ```
 
 The model is saved **only if** it beats both SmaCrossover and SimpleStrat 1 on **total return %** AND **Sharpe ratio**.
@@ -178,26 +175,42 @@ The model is saved **only if** it beats both SmaCrossover and SimpleStrat 1 on *
 #### Grid search (auto-find best hyperparameters)
 
 ```bash
-.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --grid-search
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --grid-search
 ```
 
-Tries 54 combinations of model type (RF/GBT), tree counts (100/200/300), depths (5/8/12), and learning rates (0.05/0.1/0.2). Keeps the combination with the highest validation Sharpe.
+Tries combinations of model type (RF/GBT/XGB/LGB), tree counts, depths, and learning rates. Keeps the combination with the highest validation Sharpe.
 
-#### Using a cutoff date for train/val split
+#### Kelly Criterion position sizing
 
 ```bash
-.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --kelly --auto-threshold
 ```
 
-All data before `2023-01-01` becomes training, data on or after becomes validation. Overrides the default 80/20 time-based split.
+Uses Kelly-optimal position sizes instead of fixed cash tiers, and auto-tunes the confidence threshold on the validation set.
 
-#### Full production-style training (recommended for serious use)
+#### Multi-day forecast horizon
 
 ```bash
-.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --grid-search --cutoff-date 2023-01-01 --beat-baselines
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --forecast-horizon 5 --max-hold-bars 15 --trailing-stop-pct 0.07
 ```
 
-Auto-searches the best hyperparameters, uses a fixed train/val cutoff, and only saves if the model beats both baselines.
+Labels targets with 5-day forward returns, forces exit after 15 bars, and applies a 7% trailing stop.
+
+#### Walk-forward validation
+
+```bash
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --walk-forward 5
+```
+
+Performs 5-fold walk-forward validation (train on expanding window, validate on next fold) for a more robust performance estimate.
+
+#### Full production-style training (recommended)
+
+```bash
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --grid-search --cutoff-date 2023-01-01 --kelly --auto-threshold --forecast-horizon 5 --max-hold-bars 15 --beat-baselines
+```
+
+Auto-searches hyperparameters, uses a fixed train/val cutoff, Kelly sizing, multi-day horizon, and only saves if the model beats both baselines.
 
 ### All CLI Options
 
@@ -206,15 +219,24 @@ Auto-searches the best hyperparameters, uses a fixed train/val cutoff, and only 
 | `--symbols` | `NVDA,AMD,VOO,SPY,META` | Comma-separated symbols |
 | `--years` | `20` | Years of history |
 | `--name` | `multi_symbol_model` | Model name for saving |
+| `--model-types` | `rf,gbt` | Comma-separated: rf, gbt, xgb, lgb |
 | `--n-estimators` | `200` | Number of trees |
 | `--max-depth` | `10` | Max tree depth |
-| `--learning-rate` | `0.1` | Learning rate (GBT only) |
+| `--learning-rate` | `0.1` | Learning rate (tree-based models) |
 | `--confidence-threshold` | `0.55` | Min confidence for BUY signal |
 | `--base-buy-size` | `1000` | Base $ amount per buy |
 | `--cutoff-date` | None | Train/val split date (ISO, e.g. `2023-01-01`) |
-| `--val-split` | `0.8` | Training fraction (used only without `--cutoff-date`) |
+| `--val-split` | `0.8` | Training fraction (only used without `--cutoff-date`) |
 | `--beat-baselines` | False | Only save if ML beats both baselines |
 | `--grid-search` | False | Auto-try hyperparameter combinations |
+| `--walk-forward` | `0` | N-fold walk-forward validation (0 = single split) |
+| `--kelly` | False | Use Kelly Criterion position sizing |
+| `--auto-threshold` | False | Auto-tune confidence threshold on validation set |
+| `--labeling` | `next_bar` | Labeling method: `next_bar` or `triple_barrier` |
+| `--forecast-horizon` | `1` | Days forward for target prediction |
+| `--max-hold-bars` | `30` | Max bars before forced exit |
+| `--trailing-stop-pct` | `0.05` | Trailing stop loss fraction (5%) |
+| `--model-dir` | `backend/ml/models/` | Output directory for saved models |
 
 ### What Gets Saved
 
@@ -251,7 +273,7 @@ Since the training script downloads data from Yahoo Finance (no Alpaca keys requ
 |---|---|---|
 | **SmaCrossover** | Rule-based | Buy when short SMA crosses above long SMA, sell on cross below |
 | **Simple Strat 1** | Rule-based | Mean reversion with DCA — buys on drops from open, sells on green days with stop loss |
-| **ML Strategy** | ML-based | Loads a trained model (RF/GBT) and generates signals from 24 technical indicator features with confidence-based position sizing |
+| **ML Strategy** | ML-based | Loads a trained model (RF/GBT/XGB/LGB) and generates signals from 38 technical indicator features with confidence-based position sizing and optional exit management |
 
 ## Build Progress
 

@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 import joblib
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
 
 MODELS_DIR = Path(__file__).parent / "models"
+
+# Any classifier with .fit(), .predict_proba(), .feature_importances_
+ModelT = Any
 
 
 @dataclass
@@ -28,7 +30,7 @@ class ModelMetadata:
 
 
 def save_model(
-    model: RandomForestClassifier | GradientBoostingClassifier,
+    model: ModelT,
     name: str,
     metadata: ModelMetadata,
     models_dir: str | Path = MODELS_DIR,
