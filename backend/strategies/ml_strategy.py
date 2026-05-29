@@ -1,3 +1,5 @@
+from collections import deque
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -20,6 +22,7 @@ class MLStrategy(Strategy):
         trailing_stop_pct: float | object = _UNSET,
         context_symbols: list[str] | None = None,
         online_learning: bool = False,
+        online_learning_every_n: int = 5,
     ):
         self._explicitly_set: set[str] = set()
 
@@ -50,7 +53,13 @@ class MLStrategy(Strategy):
         self.sell_portion = 100.0
         self.context_symbols = context_symbols or []
         self.online_learning = online_learning
+        self.online_learning_every_n = online_learning_every_n
         self._forecast_horizon = 1
+        self._online_update_count = 0
+        self._online_burn_in = 20
+        self._online_rolling_window = 50
+        self._online_accuracy: deque = deque(maxlen=self._online_rolling_window)
+        self._online_accuracy_threshold = 0.45
         self._kelly_wins = 0.0
         self._kelly_losses = 0.0
         self._kelly_win_pct = 0.0
@@ -167,29 +176,56 @@ class MLStrategy(Strategy):
         if i >= len(self._features_df):
             return Signal.HOLD
 
-        # ── Online learning: update model with previous bar's actual outcome ──
+        # ── Online learning: rate-limited, drift-aware partial_fit ──
         horizon = self._forecast_horizon
         if self.online_learning and i >= horizon and hasattr(self.model, "partial_fit"):
             lookback_idx = i - horizon
             prev_row = self._features_df.iloc[lookback_idx]
             try:
                 prev_feat = prev_row[self.feature_columns].values.reshape(1, -1)
-                if not np.any(np.isnan(prev_feat)):
-                    actual_target = int(
-                        data.iloc[i]["close"] > data.iloc[lookback_idx]["close"]
-                    )
-                    classes = getattr(self.model, "classes_", np.array([0, 1]))
-                    self.model.partial_fit(prev_feat, [actual_target], classes=classes)
+                if np.any(np.isnan(prev_feat)) or np.any(np.isinf(prev_feat)):
+                    pass  # skip — feature integrity check failed
+                elif self._online_update_count < self._online_burn_in:
+                    # ── Burn-in: always update until threshold reached ──
+                    self._do_partial_fit(prev_feat, data, i, lookback_idx)
+                elif i % self.online_learning_every_n == 0:
+                    # ── Rate-limit check passed ──
+                    # Check rolling accuracy for drift
+                    if (len(self._online_accuracy) == self._online_rolling_window
+                            and sum(self._online_accuracy) / self._online_rolling_window
+                            < self._online_accuracy_threshold):
+                        pass  # drift detected — pause updates
+                    else:
+                        self._do_partial_fit(prev_feat, data, i, lookback_idx)
             except Exception:
                 pass
 
+        return self._evaluate_signal(i, data, portfolio)
+
+    def _do_partial_fit(self, prev_feat, data, i, lookback_idx):
+        """Update the model on one bar and track rolling accuracy."""
+        actual_target = int(
+            data.iloc[i]["close"] > data.iloc[lookback_idx]["close"]
+        )
+        classes = getattr(self.model, "classes_", np.array([0, 1]))
+
+        # Check if model's pre-update prediction agreed with reality (drift signal)
+        prev_proba = self.model.predict_proba(prev_feat)[0]
+        prev_pred = 1 if prev_proba[1] >= 0.5 else 0
+        self._online_accuracy.append(1 if prev_pred == actual_target else 0)
+
+        self.model.partial_fit(prev_feat, [actual_target], classes=classes)
+        self._online_update_count += 1
+
+    def _evaluate_signal(self, i: int, data: pd.DataFrame, portfolio: Portfolio) -> str:
+        """Run model inference and generate a trading signal."""
         row = self._features_df.iloc[i]
         try:
             features = row[self.feature_columns].values.reshape(1, -1)
         except (KeyError, ValueError):
             return Signal.HOLD
 
-        if np.any(np.isnan(features)):
+        if np.any(np.isnan(features)) or np.any(np.isinf(features)):
             return Signal.HOLD
 
         proba = self.model.predict_proba(features)[0]

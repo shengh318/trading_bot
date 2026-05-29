@@ -245,7 +245,14 @@ Uses Kelly-optimal position sizes instead of fixed cash tiers, and auto-tunes th
 
 Labels targets with 5-day forward returns, forces exit after 15 bars, and applies a 7% trailing stop.
 
-#### ⭐ Recommended — best possible model (all features combined)
+#### 🧪 Kitchen sink experiment (all features combined — for exploration, not deployment)
+
+> **⚠️ Warning:** This enables 10+ interacting features simultaneously. If it produces a good
+> result, it is impossible to tell which parts drove the improvement. If it fails to beat
+> baselines, it is impossible to tell which parts hurt. **The recommended workflow is to
+> add one enhancement at a time**, validate that each independently improves out-of-sample
+> Sharpe, and only combine features that have individually proven their worth. This command
+> is for curiosity / exploration, not for production use.
 
 ```bash
 # macOS / Linux
@@ -280,6 +287,118 @@ Enables every ML feature:
 - **Beat baselines** — only saves if it outperforms SMA crossover + SimpleStrat 1
 
 Training time is significantly longer than basic mode.
+
+---
+
+### Recommended Workflow: Add One Enhancement at a Time
+
+> **Why this matters.** Combining 10+ features at once makes it impossible to know which part
+> drove the result. The correct approach is to start with a bare baseline, add one enhancement
+> per run, validate that each independently **improves out-of-sample Sharpe**, and only combine
+> things that have individually proven their worth.
+
+#### Step 1 — Train a baseline to beat
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name baseline
+```
+Train RF + GBT on default params. Note the validation Sharpe. **This is your reference point.** Every enhancement must improve on it.
+
+---
+
+#### Step 2 — Add grid search (find better hyperparams)
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step2_grid --grid-search
+```
+If validation Sharpe improves → keep grid search. If not → skip it for this dataset.
+
+---
+
+#### Step 3 — Add walk-forward validation
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step3_wf --walk-forward 5 --grid-search
+```
+More robust performance estimate. Compare averaged Sharpe across folds to the single-split baseline.
+
+---
+
+#### Step 4 — Try more model types (SGD, MLP)
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step4_models --model-types rf,gbt,xgb,lgb,sgd,mlp --grid-search --walk-forward 5
+```
+Compare all six types. SGD enables online learning later; MLP may capture nonlinear patterns.
+If none beat the baseline, revert to `rf,gbt` (faster, more reliable).
+
+---
+
+#### Step 5 — Add stacking ensemble
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step5_stack --model-types rf,gbt,xgb,lgb --stacking --grid-search --walk-forward 5
+```
+Does the meta-model blend improve Sharpe over the best single model? If not, stacking adds complexity without benefit.
+
+---
+
+#### Step 6 — Add multi-horizon ensemble
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step6_mh --model-types rf,gbt --multi-horizon 1,5,21 --stacking --walk-forward 5
+```
+If multi-timescale predictions improve Sharpe → keep it. If it dilutes signal → skip.
+
+---
+
+#### Step 7 — Add regime-aware modulation
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step7_regime --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5
+```
+Does Hurst/choppiness modulation help? Compare the averaged regime-aware predictions to unmodulated.
+
+---
+
+#### Step 8 — Add context symbols (market macro features)
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step8_context --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5
+```
+Market-wide features (SPY, VOO) add ~76 columns. If Sharpe improves → keep. If it hurts → context may be adding noise for your symbols.
+
+---
+
+#### Step 9 — Add Kelly sizing + auto-threshold
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step9_kelly --kelly --auto-threshold --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5
+```
+Kelly optimizes position sizing; auto-threshold finds the best confidence cutoff. Both should improve risk-adjusted returns independently.
+
+---
+
+#### Step 10 — Add triple-barrier labeling
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step10_tb --labeling triple_barrier --triple-barrier-pct 0.02 --triple-barrier-max-bars 10 --kelly --auto-threshold --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5 --beat-baselines
+```
+de Prado's profit-target / stop-loss labeling. More realistic than next-bar direction. Only saves if it beats both baselines.
+
+---
+
+#### Step 11 — Lock in with `--beat-baselines`
+
+Take your best-performing combination and add `--beat-baselines` to make sure it outperforms SmaCrossover + SimpleStrat 1 before saving:
+
+```bash
+python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name champion --kelly --auto-threshold --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5 --labeling triple_barrier --beat-baselines
+```
+
+Only the flags that actually improved Sharpe should be included. If a feature didn't help, leave it out.
+
+---
 
 ### All CLI Options
 

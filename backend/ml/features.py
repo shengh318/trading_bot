@@ -7,6 +7,28 @@ import pandas as pd
 
 EXCLUDED_COLUMNS = {"open", "high", "low", "close", "volume", "trade_count", "vwap", "symbol", "target"}
 
+_EPS = 1e-12
+
+
+def safe_divide(num, denom):
+    """Divide *num* by *denom*, replacing zero / NaN denominators with NaN.
+
+    The caller should call :func:`clean_features` on the full DataFrame
+    afterwards to fill remaining NaN values with 0.
+    """
+    denom = denom.replace(0, np.nan)
+    return num / denom
+
+
+def safe_pct_change(series: pd.Series, periods: int = 1) -> pd.Series:
+    """Return ``pct_change`` with ``inf`` replaced by NaN."""
+    return series.pct_change(periods).replace([np.inf, -np.inf], np.nan)
+
+
+def clean_features(df: pd.DataFrame, fill_val: float = 0.0) -> pd.DataFrame:
+    """Replace ``inf`` / ``-inf`` with NaN, then fill all NaN with *fill_val*."""
+    return df.replace([np.inf, -np.inf], np.nan).fillna(fill_val)
+
 
 def _hurst_exponent(ts: np.ndarray) -> float:
     """Compute Hurst exponent via rescaled range (R/S) method."""
@@ -18,7 +40,7 @@ def _hurst_exponent(ts: np.ndarray) -> float:
     cumsum = np.nancumsum(deviations)
     r = np.nanmax(cumsum) - np.nanmin(cumsum)
     s = np.nanstd(ts)
-    if s <= 0 or r <= 0:
+    if s <= _EPS or r <= _EPS:
         return 0.5
     return np.log(r / s) / np.log(len(ts))
 
@@ -43,9 +65,9 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     volume = data["volume"]
 
     # --- Returns ---
-    data["ret_1"] = close.pct_change(1)
-    data["ret_5"] = close.pct_change(5)
-    data["ret_21"] = close.pct_change(21)
+    data["ret_1"] = safe_pct_change(close, 1)
+    data["ret_5"] = safe_pct_change(close, 5)
+    data["ret_21"] = safe_pct_change(close, 21)
 
     # --- Volatility ---
     data["vol_5"] = data["ret_1"].rolling(5).std()
@@ -54,12 +76,12 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     # --- SMA ratios ---
     data["sma_20"] = close.rolling(20).mean()
     data["sma_50"] = close.rolling(50).mean()
-    data["close_sma_20"] = close / data["sma_20"].replace(0, np.nan)
-    data["close_sma_50"] = close / data["sma_50"].replace(0, np.nan)
+    data["close_sma_20"] = safe_divide(close, data["sma_20"])
+    data["close_sma_50"] = safe_divide(close, data["sma_50"])
 
     # --- Volume ratio ---
     data["vol_ma_20"] = volume.rolling(20).mean()
-    data["vol_ratio"] = volume / data["vol_ma_20"].replace(0, np.nan)
+    data["vol_ratio"] = safe_divide(volume, data["vol_ma_20"])
 
     # --- RSI (14-period) ---
     delta = close.diff()
@@ -67,7 +89,7 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     loss = -delta.clip(upper=0)
     avg_gain = gain.rolling(14).mean()
     avg_loss = loss.rolling(14).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rs = safe_divide(avg_gain, avg_loss)
     data["rsi"] = 100 - (100 / (1 + rs))
 
     # --- MACD ---
@@ -88,9 +110,9 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     # --- Price position in 20-bar range ---
     data["highest_20"] = high.rolling(20).max()
     data["lowest_20"] = low.rolling(20).min()
-    data["price_position"] = (
-        (close - data["lowest_20"])
-        / (data["highest_20"] - data["lowest_20"]).replace(0, np.nan)
+    data["price_position"] = safe_divide(
+        close - data["lowest_20"],
+        data["highest_20"] - data["lowest_20"],
     )
 
     # --- Day of week (0=Monday, 4=Friday) ---
@@ -101,12 +123,12 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
         data["day_of_week"] = 0
 
     # --- Volatility ratio (short / long) ---
-    data["vol_ratio_5_21"] = data["vol_5"] / data["vol_21"].replace(0, np.nan)
+    data["vol_ratio_5_21"] = safe_divide(data["vol_5"], data["vol_21"])
 
     # --- Momentum over multiple windows ---
-    data["mom_10"] = close.pct_change(10)
-    data["mom_20"] = close.pct_change(20)
-    data["mom_60"] = close.pct_change(60)
+    data["mom_10"] = safe_pct_change(close, 10)
+    data["mom_20"] = safe_pct_change(close, 20)
+    data["mom_60"] = safe_pct_change(close, 60)
 
     # ── New features ────────────────────────────────────────────────────────
 
@@ -115,9 +137,9 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     bb_std = close.rolling(20).std()
     bb_upper = bb_mid + 2 * bb_std
     bb_lower = bb_mid - 2 * bb_std
-    data["bb_width"] = (bb_upper - bb_lower) / bb_mid.replace(0, np.nan)
+    data["bb_width"] = safe_divide(bb_upper - bb_lower, bb_mid)
     bb_range = (bb_upper - bb_lower).replace(0, np.nan)
-    data["bb_pct_b"] = (close - bb_lower) / bb_range
+    data["bb_pct_b"] = safe_divide(close - bb_lower, bb_range)
 
     # --- ADX (Average Directional Index, 14-period) ---
     high_lag = high.shift(1)
@@ -141,9 +163,9 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     s_plus_dm = plus_dm.ewm(alpha=alpha, adjust=False).mean()
     s_minus_dm = minus_dm.ewm(alpha=alpha, adjust=False).mean()
     s_tr = tr_adx.ewm(alpha=alpha, adjust=False).mean()
-    plus_di = 100 * s_plus_dm / s_tr.replace(0, np.nan)
-    minus_di = 100 * s_minus_dm / s_tr.replace(0, np.nan)
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    plus_di = 100 * safe_divide(s_plus_dm, s_tr)
+    minus_di = 100 * safe_divide(s_minus_dm, s_tr)
+    dx = 100 * safe_divide((plus_di - minus_di).abs(), plus_di + minus_di)
     data["adx"] = dx.ewm(alpha=alpha, adjust=False).mean()
     data["plus_di"] = plus_di
     data["minus_di"] = minus_di
@@ -151,14 +173,14 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     # --- OBV (normalized as ratio to 20-bar average) ---
     obv = (volume * np.sign(close.diff())).fillna(0).cumsum()
     obv_ma = obv.rolling(20).mean().replace(0, np.nan)
-    data["obv_ratio"] = obv / obv_ma
+    data["obv_ratio"] = safe_divide(obv, obv_ma)
 
     # --- MFI (Money Flow Index, 14-period) ---
     typical_price = (high + low + close) / 3
     raw_mf = typical_price * volume
     pos_mf = raw_mf.where(typical_price > typical_price.shift(1), 0).rolling(14).sum()
     neg_mf = raw_mf.where(typical_price < typical_price.shift(1), 0).rolling(14).sum()
-    data["mfi"] = 100 - (100 / (1 + pos_mf / neg_mf.replace(0, np.nan)))
+    data["mfi"] = 100 - safe_divide(100, 1 + safe_divide(pos_mf, neg_mf))
 
     # --- Lag features ---
     data["ret_1_lag1"] = data["ret_1"].shift(1)
@@ -184,8 +206,9 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     low_min = low.rolling(14).min()
     h_l_range = (high_max - low_min).replace(0, np.nan)
     atr_sum_safe = atr_sum.replace(0, np.nan)
-    data["choppiness"] = (100 * np.log10(atr_sum_safe / h_l_range) / np.log10(14))
+    data["choppiness"] = 100 * np.log10(safe_divide(atr_sum_safe, h_l_range)) / np.log10(14)
 
+    data = clean_features(data)
     return data
 
 

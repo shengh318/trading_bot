@@ -152,22 +152,19 @@ for col in ctx_feat.columns:
 
 ---
 
-### H7. Division by zero in feature computation (multiple locations)
+### ~~H7. Division by zero in feature computation (multiple locations)~~ ✅ RESOLVED
 **File:** `backend/ml/features.py`
 
-Several divisions aren't guarded:
+**Fix applied (2026-05-29):**
+- Added `safe_divide()` utility — replaces zero denominators with NaN, handles edge cases
+- Added `safe_pct_change()` — returns `pct_change` with `inf` replaced by NaN
+- Added `clean_features()` — called at end of `compute_features()`, replaces `inf` → NaN → 0
+- Added `_EPS = 1e-12` to `_hurst_exponent` guard (was `<= 0`)
+- All ~22 raw division operations replaced with `safe_divide()` / `safe_pct_change()`
+- Added `np.isinf()` checks alongside `np.isnan()` in `ml_strategy.py`
 
-| Line | Expression | Risk |
-|------|-----------|------|
-| 58 | `close / data["sma_20"]` | sma_20 could be 0 (first 20 bars) |
-| 62 | `volume / data["vol_ma_20"]` | vol_ma_20 could be 0 |
-| 70 | `avg_gain / avg_loss` | avg_loss could be 0 |
-| 93 | `(highest_20 - lowest_20)` replaced with NaN | guarded |
-| 118 | `(bb_upper - bb_lower) / bb_mid` | bb_mid could be 0 |
-| 161 | `pos_mf / neg_mf` | neg_mf could be 0 |
-| 187 | `atr_sum / h_l_range` inside `log10` | both could be 0 |
-
-Some are guarded with `.replace(0, np.nan)` but others aren't, leading to `inf` values in the feature matrix.
+**Net effect:** No `inf` or `NaN` can leak out of feature computation anymore. Zero denominators produce 0, not NaN.
+**Retrain required:** All previously saved models were trained on NaN/inf-tainted data and should be retrained.
 
 ---
 
@@ -238,10 +235,15 @@ When `--auto-threshold` is used with `--grid-search`, the threshold is tuned on 
 
 ---
 
-### M7. Out-of-fold predictions in `StackedEnsemble` use non-purged expanding windows
+### ~~M7. Out-of-fold predictions in `StackedEnsemble` use non-purged expanding windows~~ ✅ RESOLVED
 **File:** `backend/ml/stacking.py:70-103`
 
-The `TimeSeriesOOF.split()` creates folds without any purge or embargo buffer between train and validation. For financial time series with autocorrelation, this leaks information across the fold boundary.
+**Fix applied (2026-05-29):**
+- `TimeSeriesOOF.split()` now accepts a `purge_window` parameter
+- Effective embargo = `max(embargo, purge_window)` prevents label lookahead leakage
+- Training rows within `purge_window` of the validation boundary are removed (purged)
+- `StackedEnsemble.fit()` accepts and passes `purge_window` through to the OOF splitter
+- Both call sites in `train.py` compute and pass `purge_window = max(forecast_horizon, triple_barrier_max_bars)`
 
 ---
 
@@ -393,22 +395,27 @@ If context data download fails for any reason (network, API error, invalid symbo
 
 ---
 
-### L12. Online learning update logged but not rate-limited
+### ~~L12. Online learning update logged but not rate-limited~~ ✅ RESOLVED
 **File:** `backend/strategies/ml_strategy.py:154-165`
 
-Every bar with `online_learning=True` triggers a `partial_fit` call. On high-frequency data (e.g., 1-min bars), this could be thousands of updates per session, potentially causing concept drift or overfitting to recent noise.
+**Fix applied (2026-05-29):**
+- Added `online_learning_every_n` parameter (default 5, configurable) — rate-limits `partial_fit` to every N bars
+- Added burn-in period (first 20 updates always execute to stabilize the model)
+- Added rolling accuracy window (last 50 pre-update predictions vs actual outcomes)
+- Drift detection: if rolling accuracy drops below 0.45, updates pause automatically
+- Refactored prediction logic into `_evaluate_signal()` for cleaner separation
 
 ---
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| Critical | 5 |
-| High     | 7 |
-| Medium   | 10 |
-| Low      | 12 |
-| **Total**| **34** |
+| Severity | Count | Resolved |
+|----------|-------|----------|
+| Critical | 5 | 0 |
+| High     | 7 | 1 (H7) |
+| Medium   | 10 | 1 (M7) |
+| Low      | 12 | 1 (L12) |
+| **Total**| **34** | **3** |
 
 Most impactful bugs to fix first:
 1. **C1** — Online learning trains on wrong target for multi-horizon models
@@ -416,4 +423,4 @@ Most impactful bugs to fix first:
 3. **C4** — Subprocess deadlock in retrain API (can hang uvicorn)
 4. **C5** — Grid search ignores SGD/MLP-specific params
 5. **H4** — Context data download may silently fail with timezone issues
-6. **H7** — Division by zero in feature computation produces NaN/inf features
+6. ~~**H7**~~ ✅ — Division by zero in feature computation produces NaN/inf features *(resolved)*

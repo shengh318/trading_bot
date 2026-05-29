@@ -814,7 +814,11 @@ def evaluate_models(
             base_models[key] = model
         print(f"  Building StackingEnsemble ({len(base_models)} base models) ...")
         stacker = StackedEnsemble(base_models)
-        stacker.fit(train_df[feature_cols], train_df["target"])
+        pw = max(
+            params.get("forecast_horizon", 1),
+            params.get("triple_barrier_max_bars", 1) if params.get("labeling") == "triple_barrier" else 1,
+        )
+        stacker.fit(train_df[feature_cols], train_df["target"], purge_window=pw)
         label = "StackingEnsemble"
         model_out: object = stacker
         if regime_aware:
@@ -862,7 +866,11 @@ def _stacking_after_grid(
 
     print(f"  Building StackingEnsemble from grid winner ...")
     stacker = StackedEnsemble(base_models)
-    stacker.fit(train_df[feature_cols], train_df["target"])
+    pw = max(
+        params.get("forecast_horizon", 1),
+        params.get("triple_barrier_max_bars", 1) if params.get("labeling") == "triple_barrier" else 1,
+    )
+    stacker.fit(train_df[feature_cols], train_df["target"], purge_window=pw)
 
     print(f"  Backtesting StackingEnsemble ...")
     stack_res = backtest_model(
@@ -1288,6 +1296,9 @@ def main() -> None:
         "use_kelly": args.kelly,
         "max_hold_bars": args.max_hold_bars,
         "trailing_stop_pct": args.trailing_stop_pct,
+        "forecast_horizon": args.forecast_horizon,
+        "triple_barrier_max_bars": args.triple_barrier_max_bars,
+        "labeling": args.labeling,
     }
 
     # ── 3. Train & backtest ──

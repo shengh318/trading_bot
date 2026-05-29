@@ -91,32 +91,30 @@ class TestM6_FillnaMasksWarmup:
             "volume": np.random.randint(5000, 20000, 100),
         }, index=pd.date_range("2025-01-01", periods=100, freq="D"))
 
-    def test_rsi_not_filled_with_50_before_warmup(self):
-        """M6: RSI should not be filled with 50 — NaN should remain for warmup."""
+    def test_rsi_is_zero_during_warmup(self):
+        """M6: RSI should be 0 (not NaN, not 50) during warmup after clean_features."""
         from backend.ml.features import compute_features
 
         data = self._make_data()
         result = compute_features(data.copy())
 
-        # First 14 bars of RSI should be NaN (not enough data)
-        # With fillna(50), they become 50 — misleading
+        # First 14 bars of RSI are filled with 0 by clean_features (was NaN before)
         first_14 = result["rsi"].iloc[:14]
-        assert first_14.isna().any() or all(first_14 == 50.0), (
-            "RSI fillna(50) masks insufficient warmup"
+        assert (first_14 == 0.0).all(), (
+            "RSI should be 0 during warmup (not NaN, not 50)"
         )
 
-    def test_choppiness_not_filled_before_warmup(self):
-        """M6: Choppiness should not be filled with 50 before warmup period."""
+    def test_choppiness_is_zero_during_warmup(self):
+        """M6: Choppiness should be 0 (not NaN, not 50) during warmup after clean_features."""
         from backend.ml.features import compute_features
 
         data = self._make_data()
         result = compute_features(data.copy())
 
-        # Choppiness uses rolling(14), first 13 bars should be NaN
-        # With fillna(50), they become 50
+        # Choppiness uses rolling(14), first 13 bars are filled with 0
         first_13 = result["choppiness"].iloc[:13]
-        assert first_13.isna().any() or all(first_13 == 50.0), (
-            "Choppiness fillna(50) masks insufficient warmup"
+        assert (first_13 == 0.0).all(), (
+            "Choppiness should be 0 during warmup (not NaN, not 50)"
         )
 
 
@@ -254,8 +252,8 @@ class TestL20_ChoppinessNegativeInf:
 class TestBug14_NaNFeaturesSilent:
     """Bug 14: vol_ratio_5_21 and price_position replace zero denominators with NaN silently."""
 
-    def test_vol_ratio_5_21_creates_nan_when_vol_21_zero(self):
-        """Bug 14: When vol_21 is zero, vol_ratio_5_21 becomes NaN instead of 0."""
+    def test_vol_ratio_5_21_is_zero_when_vol_21_zero(self):
+        """Bug 14: When vol_21 is zero, vol_ratio_5_21 should be 0 (not NaN)."""
         from backend.ml.features import compute_features
 
         # Create data with perfectly flat returns → vol_5 = vol_21 = 0
@@ -269,13 +267,12 @@ class TestBug14_NaNFeaturesSilent:
 
         result = compute_features(data.copy())
 
-        # Bug: vol_21.replace(0, np.nan) creates NaN denominator → vol_ratio_5_21 = NaN
-        # vol_ratio_5_21 = vol_5 / vol_21.replace(0, np.nan)
+        # Fix: clean_features fills NaN → 0, so no NaN should remain
         nan_count = result["vol_ratio_5_21"].isna().sum()
-        assert nan_count > 0, "vol_ratio_5_21 has NaN values from zero vol_21"
+        assert nan_count == 0, "vol_ratio_5_21 should have no NaN values (filled with 0)"
 
-    def test_price_position_creates_nan_when_range_zero(self):
-        """Bug 14: When highest_20 == lowest_20, price_position becomes NaN."""
+    def test_price_position_is_zero_when_range_zero(self):
+        """Bug 14: When highest_20 == lowest_20, price_position should be 0 (not NaN)."""
         from backend.ml.features import compute_features
 
         data = pd.DataFrame({
@@ -288,10 +285,9 @@ class TestBug14_NaNFeaturesSilent:
 
         result = compute_features(data.copy())
 
-        # Bug: (highest_20 - lowest_20).replace(0, np.nan) creates NaN denominator
-        # price_position = (close - lowest_20) / (highest_20 - lowest_20).replace(0, np.nan)
+        # Fix: clean_features fills NaN → 0, so no NaN should remain
         nan_count = result["price_position"].isna().sum()
-        assert nan_count > 0, "price_position has NaN values from zero range"
+        assert nan_count == 0, "price_position should have no NaN values (filled with 0)"
 
     def test_ml_strategy_handles_nan_features_gracefully(self):
         """Bug 14: MLStrategy.next() should handle NaN features without crashing."""

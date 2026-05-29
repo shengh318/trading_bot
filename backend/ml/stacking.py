@@ -18,24 +18,40 @@ class TimeSeriesOOF:
     Each fold trains on an increasingly large prefix of the data and
     validates on the next contiguous chunk.  An *embargo* gap is left
     between train and validation to prevent leakage from autocorrelation.
+
+    When a *purge_window* is provided, the last *purge_window* rows of
+    the training set are additionally removed (purged) to prevent label
+    lookahead leakage into the validation set.
     """
 
     def __init__(self, n_splits: int = 5, embargo: int = 5):
         self.n_splits = n_splits
         self.embargo = embargo
 
-    def split(self, X) -> list[tuple[list[int], list[int]]]:
+    def split(self, X, purge_window: int = 0) -> list[tuple[list[int], list[int]]]:
         n = len(X)
         folds: list[tuple[list[int], list[int]]] = []
+        effective_embargo = max(self.embargo, purge_window)
         for i in range(1, self.n_splits + 1):
             split_idx = int(n * i / (self.n_splits + 1))
-            embargo_end = min(split_idx + self.embargo, n)
-            train_idx = list(range(split_idx))
+
+            # ── Build training indices (with purge) ──
+            raw_train = list(range(split_idx))
+            if purge_window > 0 and len(raw_train) > purge_window:
+                train_idx = raw_train[:-purge_window]
+            else:
+                train_idx = raw_train
+
+            # ── Apply embargo gap ──
+            embargo_end = min(split_idx + effective_embargo, n)
+
+            # ── Build validation indices ──
             if i < self.n_splits:
                 next_idx = int(n * (i + 1) / (self.n_splits + 1))
                 val_idx = list(range(max(split_idx, embargo_end), max(embargo_end, next_idx)))
             else:
                 val_idx = list(range(max(split_idx, embargo_end), n))
+
             folds.append((train_idx, val_idx))
         return folds
 
@@ -68,7 +84,7 @@ class StackedEnsemble(BaseEstimator, ClassifierMixin):
         self._is_fitted = False
         self.classes_: np.ndarray | None = None
 
-    def fit(self, X, y):
+    def fit(self, X, y, purge_window: int = 0):
         # ── Train base models on full data ──
         for name, model in self.base_models.items():
             model.fit(X, y)
@@ -77,10 +93,11 @@ class StackedEnsemble(BaseEstimator, ClassifierMixin):
         n = len(X)
         meta_features = np.zeros((n, len(self.base_models)))
         oof_splitter = TimeSeriesOOF(self.n_splits)
+        oof_folds = oof_splitter.split(X, purge_window=purge_window)
 
         for col_idx, (name, model) in enumerate(self.base_models.items()):
             oof_preds = np.zeros(n)
-            for train_idx, val_idx in oof_splitter.split(X):
+            for train_idx, val_idx in oof_folds:
                 if isinstance(X, pd.DataFrame):
                     X_tr = X.iloc[train_idx]
                     y_tr = y.iloc[train_idx] if isinstance(y, pd.Series) else y[train_idx]

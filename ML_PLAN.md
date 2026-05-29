@@ -589,3 +589,33 @@ The model adapts in real time as market conditions change, without requiring a f
 | Choppiness > 60 | Choppy / Sideways | Suppress all signals → HOLD |
 
 The Hurst exponent and choppiness index are already computed as features in `compute_features()`, so no additional data is needed.
+
+---
+
+## Phase D — Data Integrity & Anti-Leakage ✅ (Done)
+
+**Goal:** Fix audit-discovered data integrity issues that could silently invalidate historical results.
+
+| # | Task | File | Status |
+|---|------|------|--------|
+| D1 | **Safe division in features** — replace all raw `/` operations with `safe_divide()`, add `safe_pct_change()`, replace `inf`/`NaN` with 0 at the end of `compute_features()`. Check `isinf` alongside `isnan` in strategy inference. | `backend/ml/features.py`, `backend/strategies/ml_strategy.py` | ✅ |
+| D2 | **Purged OOF for stacking** — pass `purge_window` (based on forecast horizon) to `TimeSeriesOOF.split()`, purge training rows near the fold boundary, use `max(embargo, purge_window)` as the effective embargo gap. | `backend/ml/stacking.py`, `backend/ml/train.py` | ✅ |
+| D3 | **Rate-limited online learning** — throttle `partial_fit` to every N bars (default 5), add burn-in period, track rolling accuracy over a 50-bar window, pause updates when drift is detected (accuracy < 45%). | `backend/strategies/ml_strategy.py` | ✅ |
+
+### Why Phase D Matters
+
+The three fixes in this phase address the most subtle but dangerous class of bugs:
+- **D1 (Division by zero):** NaN/`inf` features silently corrupt training data. Tree-based models handle NaN differently, so a model could be "best" purely because it happened to handle a specific NaN pattern well — not because it learned anything meaningful.
+- **D2 (Purged OOF):** The walk-forward outer split correctly purges and embargoes, but the inner OOF split in stacking re-introduced leakage at the ensemble level. This defeated the purpose of walk-forward.
+- **D3 (Online learning throttle):** Updating on every bar causes the model to constantly drift from what was validated. A bad week gets "learned" and the model starts systematically avoiding profitable trades.
+
+### CLI Additions (Phase D)
+
+No new flags. Behavioral changes:
+- `--stacking` now uses purged OOF splits automatically; purge_window derived from `forecast_horizon` and `triple_barrier_max_bars`
+- `--model-types sgd` with online learning in `MLStrategy` now uses `online_learning_every_n=5` by default (configurable in strategy constructor)
+- Feature computation is now guaranteed to produce finite values — no NaN/`inf` can leak to the model
+
+### Retrain Required
+
+All models trained before Phase D should be retrained, since the feature pipeline now produces different (correct) values for edge cases that previously produced NaN/`inf`. The fix is backward-compatible in code but the training data has changed.

@@ -435,15 +435,15 @@ class TestH3_HasPositionDesync:
         )
 
     def test_position_tracking_uses_portfolio_not_just_flag(self):
-        """H3: next() should check portfolio.positions before trusting _has_position."""
+        """H3: next()/_evaluate_signal() should check portfolio.positions before trusting _has_position."""
         from backend.strategies.ml_strategy import MLStrategy
         import inspect
 
-        source = inspect.getsource(MLStrategy.next)
+        source = inspect.getsource(MLStrategy.next) + inspect.getsource(MLStrategy._evaluate_signal)
         # The fix should have has_position check portfolio.positions
         # not just rely on self._has_position flag
         assert "portfolio.positions.get" in source or "portfolio.positions[symbol]" in source, (
-            "H3: next() must verify actual portfolio positions, not just _has_position flag"
+            "H3: next()/_evaluate_signal() must verify actual portfolio positions"
         )
 
 
