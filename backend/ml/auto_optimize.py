@@ -83,7 +83,7 @@ def run_train(
         if v is not None:
             cli.append(str(v))
 
-    cmd = [sys.executable, "-m", "backend.ml.train", "--name", name] + cli
+    cmd = [sys.executable, "-u", "-m", "backend.ml.train", "--name", name] + cli
     cli_str = " ".join(cli)
 
     # ── Training banner ──────────────────────────────────────────────
@@ -107,7 +107,7 @@ def run_train(
     )
     if process.stdout is not None:
         for line in process.stdout:
-            print(line, end="")
+            print(line, end="", flush=True)
             output_lines.append(line)
     try:
         process.wait(timeout=timeout)
