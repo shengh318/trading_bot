@@ -92,25 +92,34 @@ def run_train(
     print(f"  {Fore.CYAN}Step {step_index}/{total_steps}  :  {Style.BRIGHT}{step_label}{Style.RESET_ALL}")
     print(f"  {Fore.CYAN}{'─' * 70}{Style.RESET_ALL}")
     print(f"  Command    :  python -m backend.ml.train --name {name} {cli_str}")
-    print(f"  Status     :  {Fore.YELLOW}Training...{Style.RESET_ALL}")
     print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
     print()
 
+    # ── Stream subprocess output in real-time ────────────────────────
     start = time.time()
-    result = subprocess.run(
+    output_lines: list[str] = []
+    process = subprocess.Popen(
         cmd,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=timeout,
+        bufsize=1,
     )
+    if process.stdout is not None:
+        for line in process.stdout:
+            print(line, end="")
+            output_lines.append(line)
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        elapsed = time.time() - start
+        output = "".join(output_lines)
+        print(f"\n  {Fore.RED}Timed out after {format_duration(elapsed)}{Style.RESET_ALL}")
+        return None, output
     elapsed = time.time() - start
-    output = result.stdout + result.stderr
-
-    # Print tail of output (last ~80 lines)
-    lines = output.splitlines()
-    tail = lines[-min(len(lines), 80):]
-    for ln in tail:
-        print(ln)
+    output = "".join(output_lines)
 
     sharpe = parse_sharpe(output)
 
