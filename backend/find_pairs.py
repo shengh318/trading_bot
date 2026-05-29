@@ -151,13 +151,15 @@ def find_pairs(
     else:
         all_prices = raw.copy()
     # Drop tickers with insufficient data
-    min_rows = 50
+    min_rows = 252
     valid = [c for c in all_prices.columns if all_prices[c].notna().sum() >= min_rows]
     dropped = set(all_prices.columns) - set(valid)
     if dropped:
         logger.warning(f"Dropped {len(dropped)} tickers with insufficient data: {sorted(dropped)}")
         all_prices = all_prices[valid]
-    all_prices = all_prices.ffill().dropna(how="any")
+    # Forward-fill within each column (do NOT drop rows — with 500+ tickers,
+    # at least one will have NaN on any given day, destroying the dataset)
+    all_prices = all_prices.ffill()
     if len(all_prices.columns) < 2:
         logger.error("Fewer than 2 valid tickers remaining after filtering")
         return []

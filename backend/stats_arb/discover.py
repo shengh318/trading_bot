@@ -83,6 +83,7 @@ def _fetch_preset_tickers(preset: str) -> list[str]:
 def _fetch_wikipedia_table(url: str) -> pd.DataFrame:
     """Fetch a Wikipedia HTML table using proper headers to avoid 403."""
     import urllib.request
+    from io import StringIO
     req = urllib.request.Request(
         url,
         headers={
@@ -95,7 +96,7 @@ def _fetch_wikipedia_table(url: str) -> pd.DataFrame:
     )
     with urllib.request.urlopen(req) as resp:
         html = resp.read().decode("utf-8")
-    return pd.read_html(html)
+    return pd.read_html(StringIO(html))
 
 
 def _get_sp500_tickers() -> list[str]:
