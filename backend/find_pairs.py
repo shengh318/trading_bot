@@ -84,35 +84,54 @@ def _get_highly_correlated_pairs(
     return pairs
 
 
+def _suppress_lapack_stderr():
+    """Redirect C-level stderr to nul to suppress LAPACK noise from statsmodels.
+    Returns a cleanup callable to restore stderr."""
+    import os
+    if not hasattr(os, 'dup'):
+        return None
+    try:
+        old_stderr = os.dup(2)
+        null_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null_fd, 2)
+        os.close(null_fd)
+        return lambda: _restore_stderr(old_stderr)
+    except Exception:
+        return None
+
+def _restore_stderr(fd):
+    import os
+    try:
+        os.dup2(fd, 2)
+        os.close(fd)
+    except Exception:
+        pass
+
+def _run_coint_silent(prices: pd.DataFrame, significance: float):
+    """Run CointegrationTester with stderr and warning suppression."""
+    import warnings
+    cleanup = _suppress_lapack_stderr()
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ct = CointegrationTester(prices, significance)
+            return ct.run()
+    finally:
+        if cleanup:
+            cleanup()
+
+
 def _test_coint(args: tuple) -> tuple[str, str, float, float]:
     """Quick EG cointegration test on a single pair using cached parquet data."""
-    import os
-    import warnings
     a, b, data_path, significance = args
     try:
         prices = pd.read_parquet(data_path, columns=[a, b])
         if len(prices) < 50:
             return (a, b, 1.0, 0.0)
-        # Skip near-identical pairs (collinearity breaks cointegration test)
         corr_val = prices[a].corr(prices[b])
         if corr_val >= 0.99 or not np.isfinite(corr_val):
             return (a, b, 1.0, 0.0)
-        # Suppress LAPACK/BLAS stderr noise from statsmodels
-        devnull = os.devnull
-        old_stderr = os.dup(2) if hasattr(os, 'dup') else None
-        if old_stderr is not None:
-            null_fd = os.open(devnull, os.O_WRONLY)
-            os.dup2(null_fd, 2)
-            os.close(null_fd)
-        try:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="y0 and y1 are.*perfectly colinear")
-                ct = CointegrationTester(prices, significance)
-                res = ct.run()
-        finally:
-            if old_stderr is not None:
-                os.dup2(old_stderr, 2)
-                os.close(old_stderr)
+        res = _run_coint_silent(prices, significance)
         if res.is_cointegrated:
             return (a, b, res.p_value, -np.log10(max(res.p_value, 1e-15)))
         return (a, b, 1.0, 0.0)
@@ -125,12 +144,17 @@ def _analyze_full(args: tuple):
     """Full pipeline for a single pair."""
     a, b, start, end, significance, capital = args
     try:
-        analyzer = PairAnalyzer(
-            a, b, start, end,
-            significance=significance,
-            capital=capital,
-        )
-        return analyzer.analyze()
+        cleanup = _suppress_lapack_stderr()
+        try:
+            analyzer = PairAnalyzer(
+                a, b, start, end,
+                significance=significance,
+                capital=capital,
+            )
+            return analyzer.analyze()
+        finally:
+            if cleanup:
+                cleanup()
     except Exception as e:
         logger.error(f"Full analysis failed {a}/{b}: {e}")
         return None
