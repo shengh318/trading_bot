@@ -21,6 +21,10 @@ import sys
 import time
 from pathlib import Path
 
+from colorama import init, Fore, Style
+
+init(autoreset=True)
+
 
 def format_duration(seconds: float) -> str:
     hours = int(seconds // 3600)
@@ -62,7 +66,10 @@ def run_train(
     flags: dict[str, str | None],
     base_flags: dict[str, str],
     name: str,
-    timeout: int,
+    step_label: str = "",
+    step_index: int | str = 0,
+    total_steps: int | str = 0,
+    timeout: int = 7200,
 ) -> tuple[float | None, str]:
     """Run train.py with *base_flags* merged with *flags*.
 
@@ -77,10 +84,17 @@ def run_train(
             cli.append(str(v))
 
     cmd = [sys.executable, "-m", "backend.ml.train", "--name", name] + cli
+    cli_str = " ".join(cli)
+
+    # ── Training banner ──────────────────────────────────────────────
     print()
-    print("-" * 70)
-    print(f"  python -m backend.ml.train --name {name} {' '.join(cli)}")
-    print("-" * 70)
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}Step {step_index}/{total_steps}  :  {Style.BRIGHT}{step_label}{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{'─' * 70}{Style.RESET_ALL}")
+    print(f"  Command    :  python -m backend.ml.train --name {name} {cli_str}")
+    print(f"  Status     :  {Fore.YELLOW}Training...{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print()
 
     start = time.time()
     result = subprocess.run(
@@ -99,9 +113,43 @@ def run_train(
         print(ln)
 
     sharpe = parse_sharpe(output)
-    label = f"Sharpe={sharpe:.4f}" if sharpe is not None else "no Sharpe parsed"
-    print(f"  Elapsed: {format_duration(elapsed)}  ->  {label}")
+
+    # ── Result line ──────────────────────────────────────────────────
+    elapsed_str = format_duration(elapsed)
+    if sharpe is not None:
+        print(f"\n  Result     :  Sharpe {Fore.GREEN}{sharpe:.4f}{Style.RESET_ALL}  |  Elapsed: {Fore.YELLOW}{elapsed_str}{Style.RESET_ALL}")
+    else:
+        print(f"\n  Result     :  no Sharpe parsed  |  Elapsed: {elapsed_str}")
+
     return sharpe, output
+
+
+def print_leaderboard(log: list[tuple[str, float | None, bool]]) -> None:
+    """Print a ranked leaderboard of all tested configurations."""
+    if not log:
+        return
+
+    print(f"\n  {Fore.CYAN}{'═' * 40}{Style.RESET_ALL}")
+    print(f"  {Style.BRIGHT}LEADERBOARD{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{'═' * 40}{Style.RESET_ALL}")
+    print(f"  {'':>4}  {'Enhancement':<38} {'Sharpe':>8}  {'Verdict':<8}")
+    print(f"  {Fore.CYAN}{'─' * 64}{Style.RESET_ALL}")
+
+    # Sort by Sharpe descending (None values at bottom)
+    ranked = sorted(log, key=lambda x: (x[1] is None, -(x[1] or 0)))
+
+    for rank, (sname, sharpe, kept) in enumerate(ranked, 1):
+        sharpe_str = f"{sharpe:.4f}" if sharpe is not None else "  N/A  "
+        color = Fore.GREEN if kept else Fore.RED
+        verdict = f"{color}KEPT{Style.RESET_ALL}" if kept else f"{Fore.RED}SKIP{Style.RESET_ALL}"
+
+        if rank == 1 and sharpe is not None:
+            prefix = f"{Fore.YELLOW}>>{Style.RESET_ALL}"
+        else:
+            prefix = f"  "
+
+        print(f"  {prefix} {rank:>2}.  {sname:<38} {Fore.WHITE}{sharpe_str:>8}{Style.RESET_ALL}  {verdict}")
+    print(f"  {Fore.CYAN}{'─' * 64}{Style.RESET_ALL}")
 
 
 def flags_to_cli(flags: dict[str, str | None]) -> list[str]:
@@ -225,13 +273,15 @@ def main() -> None:
             {"--labeling": "triple_barrier", "--triple-barrier-pct": "0.02", "--triple-barrier-max-bars": "10"},
         ))
 
-    print("=" * 70)
-    print("  ML Auto-Optimizer -- Forward Selection")
-    print("  Symbols:", args.symbols)
-    print("  Years:", args.years)
-    print("=" * 70)
-    print(f"\n{'Step':<5} {'Enhancement':<40} {'Result':<10}")
-    print("-" * 55)
+    total_steps = len(steps)
+    symbol_list = args.symbols.split(",")
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Style.BRIGHT}ML AUTO-OPTIMIZER  —  Forward Selection{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{'─' * 70}{Style.RESET_ALL}")
+    print(f"  Symbols    :  {'  '.join(s.upper() for s in symbol_list)}  ({len(symbol_list)} total)")
+    print(f"  History    :  {args.years} years  |  Cutoff: 2023-01-01")
+    print(f"  Steps      :  {total_steps} total")
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
 
     active_flags: dict[str, str | None] = {}
     best_sharpe: float | None = None
@@ -242,7 +292,11 @@ def main() -> None:
         candidate.update(new_flags)
         safe_name = f"autotune_step{step_idx}"
 
-        sharpe, _ = run_train(candidate, base_flags, safe_name, timeout=args.timeout)
+        sharpe, _ = run_train(
+            candidate, base_flags, safe_name,
+            step_label=step_name, step_index=step_idx, total_steps=total_steps,
+            timeout=args.timeout,
+        )
 
         improved = (
             sharpe is not None
@@ -253,81 +307,98 @@ def main() -> None:
             kept = True
             active_flags = candidate
             best_sharpe = sharpe
-            print(f"  [{step_idx}]  {step_name:<40} KEPT  (Sharpe {sharpe:.4f})")
+            print(f"\n  {Fore.GREEN}■ KEPT{Style.RESET_ALL}  {step_name}  →  Sharpe {Fore.GREEN}{sharpe:.4f}{Style.RESET_ALL}  {Fore.CYAN}(new best!){Style.RESET_ALL}")
         else:
             kept = False
-            reason = f"Sharpe {sharpe:.4f} <= {best_sharpe:.4f}" if sharpe is not None else "No Sharpe parsed"
-            print(f"  [{step_idx}]  {step_name:<40} SKIP  ({reason})")
+            if sharpe is not None:
+                diff = sharpe - (best_sharpe or 0.0)
+                print(f"\n  {Fore.RED}■ SKIP{Style.RESET_ALL}  {step_name}  →  Sharpe {sharpe:.4f}  ({Fore.YELLOW}{diff:+.4f}{Style.RESET_ALL} vs best {best_sharpe:.4f})")
+            else:
+                print(f"\n  {Fore.RED}■ SKIP{Style.RESET_ALL}  {step_name}  →  no Sharpe parsed")
 
         log.append((step_name, sharpe, kept))
 
-    # -- Forward-selection summary --
-    print()
-    print("=" * 70)
-    print("  FORWARD-SELECTION RESULTS")
-    print("=" * 70)
-    print(f"\n  Best step Sharpe:  {best_sharpe:.4f}" if best_sharpe is not None else "\n  Best step Sharpe:  (none)")
-    print(f"\n  Optimal flags discovered:")
-    if active_flags:
-        for k, v in active_flags.items():
-            if v is None:
-                print(f"    {k}")
-            else:
-                print(f"    {k} {v}")
-    else:
-        print("    (none -- baseline only)")
+        # Show leaderboard after each step
+        print_leaderboard(log)
 
-    # -- Champion training --
+    # ── Forward-selection summary ────────────────────────────────────
+    print()
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Style.BRIGHT}FORWARD-SELECTION COMPLETE{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+
+    if best_sharpe is not None:
+        print(f"\n  {Fore.GREEN}Best Sharpe   :  {Style.BRIGHT}{best_sharpe:.4f}{Style.RESET_ALL}")
+    else:
+        print(f"\n  Best Sharpe   :  {Fore.RED}(none){Style.RESET_ALL}")
+
+    print(f"\n  {Style.BRIGHT}Optimal flags:{Style.RESET_ALL}")
+    if active_flags:
+        print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+        for k, v in active_flags.items():
+            val_str = f"  {v}" if v is not None else ""
+            print(f"    {Fore.YELLOW}{k}{Style.RESET_ALL}{val_str}")
+        print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+    else:
+        print(f"    (none — baseline only)")
+
+    # ── Champion training ────────────────────────────────────────────
     if not args.champion:
-        print(f"\n  --no-champion set; skipping final champion training.")
+        print(f"\n  {Fore.YELLOW}--no-champion set; skipping final champion training.{Style.RESET_ALL}")
         print(f"  Use the optimal flags above with --beat-baselines manually.")
         return
 
     print()
-    print("=" * 70)
-    print("  CHAMPION TRAINING")
-    print("=" * 70)
-    print("  Training final model with optimal flags + full grid search")
-    print("  + walk-forward validation + beat-baselines guard ...")
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Style.BRIGHT}CHAMPION TRAINING{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{'─' * 70}{Style.RESET_ALL}")
+    print(f"  Building final model with optimal flags + --grid-search")
+    print(f"  + --walk-forward 5 for rigorous validation...")
+    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
 
     champion_flags = dict(active_flags)
     champion_flags["--grid-search"] = None
     champion_flags["--walk-forward"] = "5"
-    # Note: intentionally NOT using --beat-baselines — the champion model
-    # is always saved regardless of baseline comparison results.
 
     champion_sharpe, champion_output = run_train(
-        champion_flags, base_flags, name="champion_auto", timeout=args.timeout,
+        champion_flags, base_flags, name="champion_auto",
+        step_label="Champion (Final Model)", step_index="*", total_steps="*",
+        timeout=args.timeout,
     )
 
-    # -- Clean up intermediate step models --
+    # ── Clean up intermediate step models ────────────────────────────
     models_dir = Path("backend/ml/models")
     for f in models_dir.glob("autotune_step*.joblib"):
         f.unlink(missing_ok=True)
     for f in models_dir.glob("autotune_step*_metadata.joblib"):
         f.unlink(missing_ok=True)
 
-    # -- Final champion report --
+    # ── Final champion report ────────────────────────────────────────
     print()
-    print("=" * 70)
-    print("  DONE -- CHAMPION MODEL SAVED")
-    print("=" * 70)
-    champion_path = models_dir / "champion_auto.joblib"
-    print(f"\n  Model: {champion_path.resolve()}")
-    print(f"  Champion Sharpe:  {champion_sharpe:.4f}" if champion_sharpe is not None else "  Champion Sharpe:  (unknown)")
-    print(f"\n  Flags used:")
-    for k, v in champion_flags.items():
-        if v is None:
-            print(f"    {k}")
-        else:
-            print(f"    {k} {v}")
+    print(f"  {Fore.GREEN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{Style.BRIGHT}CHAMPION MODEL SAVED{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{'━' * 70}{Style.RESET_ALL}")
 
-    print(f"\n  To use this model for backtesting or live trading:")
-    print(f"    1. Start the API:  .venv\\Scripts\\uvicorn backend.api.main:app --reload")
-    print(f"    2. Open the frontend and select the 'ML Strategy'")
-    print(f"    3. It will automatically load '{champion_path.name}'")
+    champion_path = models_dir / "champion_auto.joblib"
+    print(f"\n  Model      :  {Style.BRIGHT}{champion_path.resolve()}{Style.RESET_ALL}")
+    if champion_sharpe is not None:
+        print(f"  Sharpe     :  {Fore.GREEN}{Style.BRIGHT}{champion_sharpe:.4f}{Style.RESET_ALL}")
+    else:
+        print(f"  Sharpe     :  {Fore.RED}(unknown){Style.RESET_ALL}")
+
+    print(f"\n  {Style.BRIGHT}Flags used:{Style.RESET_ALL}")
+    print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+    for k, v in champion_flags.items():
+        val_str = f"  {v}" if v is not None else ""
+        print(f"    {Fore.YELLOW}{k}{Style.RESET_ALL}{val_str}")
+    print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+
+    print(f"\n  {Style.BRIGHT}Next steps:{Style.RESET_ALL}")
+    print(f"    1. Start API:  {Fore.YELLOW}.venv\\Scripts\\uvicorn backend.api.main:app --reload{Style.RESET_ALL}")
+    print(f"    2. Open frontend and select 'ML Strategy'")
+    print(f"    3. It will auto-load '{champion_path.name}'")
     print()
-    print(f"  To re-train manually:")
+    print(f"  {Style.BRIGHT}Re-train manually:{Style.RESET_ALL}")
     cli_parts = ["  python -m backend.ml.train", "    --name my_model"]
     for k, v in champion_flags.items():
         if v is None:
@@ -335,6 +406,7 @@ def main() -> None:
         else:
             cli_parts.append(f"    {k} {v}")
     print(" \\\n".join(cli_parts))
+    print()
 
 
 if __name__ == "__main__":
