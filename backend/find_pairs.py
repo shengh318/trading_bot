@@ -167,22 +167,41 @@ def find_pairs(
     logger.info(f"Universe: {n} tickers")
     logger.info(f"Period: {start} -> {end}")
 
-    # ── Phase 1: Bulk download + correlation filter ──
-    logger.info(f"Phase 1: Downloading {n} tickers and computing pairwise correlations ...")
-    raw = yf.download(tickers, start=start, end=end, auto_adjust=True, progress=False)
-    if isinstance(raw.columns, pd.MultiIndex):
-        all_prices = raw["Close"].copy()
-    else:
-        all_prices = raw.copy()
+    # ── Phase 1: Batch download + correlation filter ──
+    # Download in batches of 50 to avoid yfinance date-range truncation
+    # that occurs when requesting 500 tickers in a single call.
+    logger.info(f"Phase 1: Downloading {n} tickers in batches ...")
+    batch_size = 50
+    all_prices: pd.DataFrame | None = None
+    failed_tickers: list[str] = []
+    for batch_start in range(0, n, batch_size):
+        batch = tickers[batch_start:batch_start + batch_size]
+        try:
+            raw = yf.download(batch, start=start, end=end, auto_adjust=True, progress=False)
+            if isinstance(raw.columns, pd.MultiIndex):
+                batch_prices = raw["Close"].copy()
+            else:
+                batch_prices = raw.copy()
+        except Exception as e:
+            logger.warning(f"Batch download failed for {batch}: {e}")
+            failed_tickers.extend(batch)
+            continue
+        if all_prices is None:
+            all_prices = batch_prices
+        else:
+            all_prices = all_prices.join(batch_prices, how="outer")
+
+    if all_prices is None or all_prices.empty:
+        logger.error("No data downloaded for any ticker")
+        return []
+
     # Drop tickers with insufficient data
     min_rows = 252
     valid = [c for c in all_prices.columns if all_prices[c].notna().sum() >= min_rows]
-    dropped = set(all_prices.columns) - set(valid)
+    dropped = set(all_prices.columns) - set(valid) | set(failed_tickers)
     if dropped:
-        logger.warning(f"Dropped {len(dropped)} tickers with insufficient data: {sorted(dropped)}")
+        logger.warning(f"Dropped {len(dropped)} tickers with insufficient data")
         all_prices = all_prices[valid]
-    # Forward-fill within each column (do NOT drop rows — with 500+ tickers,
-    # at least one will have NaN on any given day, destroying the dataset)
     all_prices = all_prices.ffill()
     if len(all_prices.columns) < 2:
         logger.error("Fewer than 2 valid tickers remaining after filtering")
