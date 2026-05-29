@@ -82,7 +82,7 @@ class DataLoader:
             "types": "cash_dividend",
             "start": start.date().isoformat(),
             "end": end.date().isoformat(),
-            "limit": 1000,
+            "limit": 10000,
         }
 
         resp = httpx.get(url, headers=headers, params=params)

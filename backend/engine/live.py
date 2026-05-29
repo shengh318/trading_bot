@@ -22,11 +22,13 @@ class LiveEngine:
         parameters: dict | None,
         symbols: list[str],
         timeframe_str: str,
+        initial_cash: float | None = None,
     ):
         self.strategy_name = strategy_name
         self.parameters = parameters or {}
         self.symbols = symbols
         self.timeframe_str = timeframe_str
+        self._initial_cash = initial_cash
 
         self.trading_client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=ALPACA_PAPER)
         self.data_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
@@ -39,13 +41,15 @@ class LiveEngine:
         self._callbacks: dict | None = None
         self._last_timestamps: dict[str, pd.Timestamp | None] = {}
         self._bar_count: int = 0
+        self._max_buffer_bars: int = 500
 
     async def start(self, callbacks: dict) -> None:
         self.running = True
         self._callbacks = callbacks
 
         account = self.trading_client.get_account()
-        self.portfolio = Portfolio(float(account.cash))
+        initial_cash = self._initial_cash if self._initial_cash is not None else float(account.cash)
+        self.portfolio = Portfolio(initial_cash)
         for pos in self.trading_client.get_all_positions():
             self.portfolio.positions[pos.symbol] = float(pos.qty)
             self.portfolio.avg_entry[pos.symbol] = float(pos.avg_entry_price)
@@ -187,6 +191,8 @@ class LiveEngine:
                 self.data_buffers[sym] = new_bars
             else:
                 self.data_buffers[sym] = pd.concat([self.data_buffers[sym], new_bars])
+                if len(self.data_buffers[sym]) > self._max_buffer_bars:
+                    self.data_buffers[sym] = self.data_buffers[sym].iloc[-self._max_buffer_bars:]
             self._last_timestamps[sym] = new_bars.index[-1]
 
             for idx in new_bars.index:

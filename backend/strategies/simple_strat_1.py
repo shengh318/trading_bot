@@ -50,7 +50,8 @@ class SimpleStrat1(Strategy):
             self._current_date = day_str
             self._day_open = float(data["open"].iloc[i])
             self._bought_levels = 0
-            self._last_buy_avg = 0.0
+            if position <= 0:
+                self._last_buy_avg = 0.0
 
         if position > 0 and avg_entry > 0:
             loss_pct = (avg_entry - close) / avg_entry * 100
@@ -65,15 +66,16 @@ class SimpleStrat1(Strategy):
         if avg_entry == 0 or position <= 0:
             drop_from_open = (self._day_open - close) / self._day_open * 100
             if drop_from_open >= self.entry_drop:
-                self._bought_levels += 1
-                self._last_buy_avg = close
                 return Signal.BUY
         else:
             if self._bought_levels < self.max_buys:
                 next_dca_price = self._last_buy_avg * (1 - self.entry_drop / 100)
                 if close <= next_dca_price:
-                    self._bought_levels += 1
-                    self._last_buy_avg = avg_entry
                     return Signal.BUY
 
         return Signal.HOLD
+
+    def on_trade(self, side: str, symbol: str, qty: float, price: float) -> None:
+        if side == "buy":
+            self._bought_levels += 1
+            self._last_buy_avg = price

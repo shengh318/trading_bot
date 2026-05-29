@@ -8,10 +8,20 @@ def calculate_metrics(
     initial_cash: float,
     risk_free_rate: float = 0.0,
 ) -> dict:
-    final_equity = equity_curve["equity"].iloc[-1] if not equity_curve.empty else initial_cash
+    if equity_curve.empty or len(equity_curve) == 0:
+        return {
+            "total_return_pct": 0.0,
+            "final_equity": initial_cash,
+            "sharpe_ratio": 0.0,
+            "max_drawdown_pct": 0.0,
+            "win_rate_pct": 0.0,
+            "num_trades": 0,
+            "profit_factor": 0.0,
+        }
+    final_equity = equity_curve["equity"].iloc[-1]
     total_return_pct = ((final_equity - initial_cash) / initial_cash) * 100
 
-    num_trades = len(trades[trades["side"] == "sell"]) if not trades.empty else 0
+    num_trades = len(trades) if not trades.empty else 0
 
     win_rate = 0.0
     profit_factor = 0.0
@@ -36,11 +46,13 @@ def calculate_metrics(
         equity_curve = equity_curve.copy()
         equity_curve["return"] = equity_curve["equity"].pct_change().fillna(0)
         daily_returns = equity_curve["return"].values
+        n_bars = len(daily_returns)
+        annual_factor = np.sqrt(252 * n_bars / max(n_bars, 1))
 
         if daily_returns.std() > 0:
-            excess_returns = daily_returns - risk_free_rate / 252
+            excess_returns = daily_returns - risk_free_rate / annual_factor
             sharpe_ratio = float(
-                (excess_returns.mean() / excess_returns.std()) * np.sqrt(252)
+                (excess_returns.mean() / excess_returns.std()) * annual_factor
             )
 
         cumulative_max = equity_curve["equity"].cummax()
@@ -54,5 +66,5 @@ def calculate_metrics(
         "max_drawdown_pct": max_drawdown,
         "win_rate_pct": round(win_rate, 2),
         "num_trades": num_trades,
-        "profit_factor": round(profit_factor, 2) if profit_factor != float("inf") else float("inf"),
+        "profit_factor": profit_factor if profit_factor == float("inf") else round(profit_factor, 2),
     }

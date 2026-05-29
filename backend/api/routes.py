@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -132,7 +133,7 @@ def run_backtest(req: BacktestRunRequest):
     metrics = result.metrics
     run_id = db.save_backtest_run({
         "strategy_name": req.strategy_name,
-        "parameters": str(req.parameters) if req.parameters else None,
+        "parameters": json.dumps(req.parameters) if req.parameters else None,
         "symbol": req.symbol,
         "start_date": req.start_date,
         "end_date": req.end_date or end.date().isoformat(),
@@ -151,6 +152,7 @@ def run_backtest(req: BacktestRunRequest):
     if not result.equity_curve.empty:
         db.save_backtest_snapshots(run_id, result.equity_curve.to_dict("records"))
 
-    rows = db.get_backtest_runs(limit=1)
-    match = [r for r in rows if r["id"] == run_id]
-    return db_row_to_backtest_run_response(match[0])
+    row = db.get_backtest_run_by_id(run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Backtest run not found after save")
+    return db_row_to_backtest_run_response(row)

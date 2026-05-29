@@ -1,5 +1,7 @@
 """Shared feature computation for ML training and inference."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -24,7 +26,7 @@ def _hurst_exponent(ts: np.ndarray) -> float:
 def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     """Add technical indicator feature columns to the DataFrame.
 
-    Operates in-place (adds columns). All features use only past data
+    Operates on a copy. All features use only past data
     (rolling windows) — no lookahead bias.
 
     Args:
@@ -32,8 +34,9 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
               Index should be datetime-like for day_of_week to work.
 
     Returns:
-        Same DataFrame with additional feature columns.
+        New DataFrame with additional feature columns.
     """
+    data = data.copy()
     close = data["close"]
     high = data["high"]
     low = data["low"]
@@ -51,12 +54,12 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     # --- SMA ratios ---
     data["sma_20"] = close.rolling(20).mean()
     data["sma_50"] = close.rolling(50).mean()
-    data["close_sma_20"] = close / data["sma_20"]
-    data["close_sma_50"] = close / data["sma_50"]
+    data["close_sma_20"] = close / data["sma_20"].replace(0, np.nan)
+    data["close_sma_50"] = close / data["sma_50"].replace(0, np.nan)
 
     # --- Volume ratio ---
     data["vol_ma_20"] = volume.rolling(20).mean()
-    data["vol_ratio"] = volume / data["vol_ma_20"]
+    data["vol_ratio"] = volume / data["vol_ma_20"].replace(0, np.nan)
 
     # --- RSI (14-period) ---
     delta = close.diff()
@@ -64,9 +67,8 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     loss = -delta.clip(upper=0)
     avg_gain = gain.rolling(14).mean()
     avg_loss = loss.rolling(14).mean()
-    rs = avg_gain / avg_loss
+    rs = avg_gain / avg_loss.replace(0, np.nan)
     data["rsi"] = 100 - (100 / (1 + rs))
-    data["rsi"] = data["rsi"].fillna(50.0)
 
     # --- MACD ---
     ema_12 = close.ewm(span=12, adjust=False).mean()
@@ -95,10 +97,11 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     if hasattr(data.index, "dtype") and data.index.dtype.kind == "M":
         data["day_of_week"] = data.index.dayofweek
     else:
+        warnings.warn("Non-datetime index detected; day_of_week set to 0 (Monday)")
         data["day_of_week"] = 0
 
     # --- Volatility ratio (short / long) ---
-    data["vol_ratio_5_21"] = data["vol_5"] / data["vol_21"]
+    data["vol_ratio_5_21"] = data["vol_5"] / data["vol_21"].replace(0, np.nan)
 
     # --- Momentum over multiple windows ---
     data["mom_10"] = close.pct_change(10)
@@ -141,7 +144,7 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     plus_di = 100 * s_plus_dm / s_tr.replace(0, np.nan)
     minus_di = 100 * s_minus_dm / s_tr.replace(0, np.nan)
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    data["adx"] = dx.rolling(14).mean()
+    data["adx"] = dx.ewm(alpha=alpha, adjust=False).mean()
     data["plus_di"] = plus_di
     data["minus_di"] = minus_di
 
@@ -180,7 +183,8 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     high_max = high.rolling(14).max()
     low_min = low.rolling(14).min()
     h_l_range = (high_max - low_min).replace(0, np.nan)
-    data["choppiness"] = (100 * np.log10(atr_sum / h_l_range) / np.log10(14)).fillna(50)
+    atr_sum_safe = atr_sum.replace(0, np.nan)
+    data["choppiness"] = (100 * np.log10(atr_sum_safe / h_l_range) / np.log10(14))
 
     return data
 
@@ -188,3 +192,36 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
     """Return the list of feature column names from a DataFrame that has had compute_features() applied."""
     return [c for c in df.columns if c not in EXCLUDED_COLUMNS]
+
+
+def merge_context_features(
+    df: pd.DataFrame,
+    context_data: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Compute features on context symbols and left-merge onto *df* by timestamp.
+
+    Context feature columns are prefixed with ``{symbol}_`` to avoid name
+    collisions.  Missing context dates are forward-filled (last observation
+    carried forward) so the model always has context for every bar.
+
+    Args:
+        df: Main symbol DataFrame (after ``compute_features()``).
+        context_data: Mapping ``{symbol: OHLCV DataFrame}``.
+
+    Returns:
+        New DataFrame with context feature columns added.
+    """
+    df = df.copy()
+    for ctx_name, ctx_df in context_data.items():
+        # Normalize timezone so join doesn't fail on tz-aware vs tz-naive mismatch
+        ctx_feat = compute_features(ctx_df)
+        if hasattr(ctx_feat.index, "tz") and ctx_feat.index.tz is not None:
+            ctx_feat.index = ctx_feat.index.tz_localize(None)
+        ctx_feat = ctx_feat[get_feature_columns(ctx_feat)]
+        ctx_feat = ctx_feat.add_prefix(f"{ctx_name}_")
+        if hasattr(df.index, "tz") and df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        df = df.join(ctx_feat, how="left")
+        for col in ctx_feat.columns:
+            df[col] = df[col].ffill()
+    return df

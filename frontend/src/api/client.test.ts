@@ -11,8 +11,9 @@ describe("ApiClient", () => {
   it("fetches strategies", async () => {
     const mock = [{ name: "SmaCrossover", description: "Test strat", params: [] }];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getStrategies();
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/strategies");
@@ -21,8 +22,9 @@ describe("ApiClient", () => {
   it("fetches account summary", async () => {
     const mock = { cash: 1000, portfolio_value: 5000, buying_power: 2000, day_pnl: 100 };
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getAccountSummary();
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/portfolio/summary");
@@ -31,8 +33,9 @@ describe("ApiClient", () => {
   it("fetches equity curve with limit", async () => {
     const mock = [{ timestamp: "2024-01-01", total_equity: 10000, cash: 5000 }];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getEquityCurve(100);
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/portfolio/equity-curve?limit=100");
@@ -41,8 +44,9 @@ describe("ApiClient", () => {
   it("fetches positions", async () => {
     const mock = [{ symbol: "AAPL", qty: 10, avg_entry_price: 150, current_price: 155, unrealized_pl: 50, market_value: 1550 }];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getPositions();
     expect(result).toEqual(mock);
   });
@@ -50,8 +54,9 @@ describe("ApiClient", () => {
   it("fetches orders", async () => {
     const mock = [{ id: "1", symbol: "AAPL", side: "buy", qty: 10, filled_qty: 10, filled_avg_price: 150, status: "filled", type: "market", created_at: "2024-01-01", updated_at: "2024-01-01" }];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getOrders(50);
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/orders?limit=50");
@@ -60,8 +65,9 @@ describe("ApiClient", () => {
   it("fetches backtest runs", async () => {
     const mock = [{ id: 1, strategy_name: "SmaCrossover", symbol: "AAPL", start_date: "2024-01-01", end_date: "2024-06-01", initial_cash: 10000, metrics: null, created_at: "2024-01-01" }];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getBacktestRuns();
     expect(result).toEqual(mock);
   });
@@ -69,8 +75,9 @@ describe("ApiClient", () => {
   it("fetches a single backtest run", async () => {
     const mock = { id: 1, strategy_name: "SmaCrossover", symbol: "AAPL", start_date: "2024-01-01", end_date: "2024-06-01", initial_cash: 10000, metrics: { total_return_pct: 10, final_equity: 11000, sharpe_ratio: 1.5, max_drawdown_pct: -5, win_rate_pct: 60, num_trades: 10, profit_factor: 1.2 }, created_at: "2024-01-01" };
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getBacktestRun(1);
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/backtest/runs/1");
@@ -79,8 +86,9 @@ describe("ApiClient", () => {
   it("fetches backtest trades", async () => {
     const mock = [{ bar_index: 0, timestamp: "2024-01-01", symbol: "AAPL", side: "buy", qty: 10, price: 150, pnl: null }];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getBacktestTrades(1);
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/backtest/runs/1/trades");
@@ -89,8 +97,9 @@ describe("ApiClient", () => {
   it("fetches backtest equity snapshots", async () => {
     const mock = [{ bar_index: 0, timestamp: "2024-01-01", equity: 10000, cash: 5000 }];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.getBacktestEquity(1);
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/backtest/runs/1/equity");
@@ -100,8 +109,9 @@ describe("ApiClient", () => {
     const mock = { id: 2, strategy_name: "SmaCrossover", symbol: "AAPL", start_date: "2024-01-01", end_date: "2024-06-01", initial_cash: 10000, metrics: null, created_at: "2024-01-01" };
     const req = { strategy_name: "SmaCrossover", symbol: "AAPL", start_date: "2024-01-01", end_date: "2024-06-01", initial_cash: 10000 };
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, statusText: "OK",
       json: () => Promise.resolve(mock),
-    } as Response);
+    } as unknown as Response);
     const result = await api.runBacktest(req);
     expect(result).toEqual(mock);
     expect(fetch).toHaveBeenCalledWith("/api/backtest/run", {

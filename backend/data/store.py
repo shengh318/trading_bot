@@ -116,16 +116,16 @@ class Database:
     # ── Positions ────────────────────────────────────────────
 
     def save_positions(self, positions: list[dict]) -> None:
-        self.conn.execute("DELETE FROM positions")
-        for p in positions:
-            self.conn.execute(
-                """INSERT INTO positions (symbol, qty, avg_entry_price, current_price,
-                   unrealized_pl, market_value, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (p["symbol"], p["qty"], p["avg_entry_price"], p["current_price"],
-                 p["unrealized_pl"], p["market_value"], datetime.now(timezone.utc).isoformat()),
-            )
-        self.conn.commit()
+        with self.conn:
+            self.conn.execute("DELETE FROM positions")
+            for p in positions:
+                self.conn.execute(
+                    """INSERT INTO positions (symbol, qty, avg_entry_price, current_price,
+                       unrealized_pl, market_value, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (p["symbol"], p["qty"], p["avg_entry_price"], p["current_price"],
+                     p["unrealized_pl"], p["market_value"], datetime.now(timezone.utc).isoformat()),
+                )
 
     def get_positions(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM positions ORDER BY market_value DESC").fetchall()
@@ -181,16 +181,15 @@ class Database:
         return dict(row) if row else None
 
     def delete_backtest_run(self, run_id: int) -> None:
-        self.conn.execute("DELETE FROM backtest_trades WHERE run_id = ?", (run_id,))
-        self.conn.execute("DELETE FROM backtest_snapshots WHERE run_id = ?", (run_id,))
         self.conn.execute("DELETE FROM backtest_runs WHERE id = ?", (run_id,))
         self.conn.commit()
 
     def delete_backtest_runs(self) -> None:
+        self.conn.execute("DELETE FROM backtest_runs")
         self.conn.execute("DELETE FROM backtest_trades")
         self.conn.execute("DELETE FROM backtest_snapshots")
-        self.conn.execute("DELETE FROM backtest_runs")
-        self.conn.execute("DELETE FROM sqlite_sequence WHERE name='backtest_runs'")
+        for tbl in ("backtest_runs", "backtest_trades", "backtest_snapshots"):
+            self.conn.execute("DELETE FROM sqlite_sequence WHERE name=?", (tbl,))
         self.conn.commit()
         self.conn.execute("VACUUM")
 

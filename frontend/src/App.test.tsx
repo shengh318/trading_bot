@@ -8,7 +8,7 @@ beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.toString().includes("/api/strategies")) {
-      return Promise.resolve({ json: () => Promise.resolve([]) } as Response);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response);
     }
     const okResponse = (data: unknown) =>
       Promise.resolve({ ok: true, json: () => Promise.resolve(data) } as unknown as Response);

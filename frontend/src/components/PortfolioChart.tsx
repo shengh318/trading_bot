@@ -67,7 +67,9 @@ export default function PortfolioChart({ data, markers = [], height = 350, initi
         color: m.side === "buy" ? colors.positive : colors.negative,
         size: 1,
       }));
-      series.setMarkers(chartMarkers);
+      if (typeof series.setMarkers === "function") {
+        series.setMarkers(chartMarkers);
+      }
     }
 
     seriesRef.current = series;
@@ -87,11 +89,13 @@ export default function PortfolioChart({ data, markers = [], height = 350, initi
   useEffect(() => {
     if (!seriesRef.current) return;
     if (data.length === 0) {
-      seriesRef.current.setData([]);
-      seriesRef.current.setMarkers([]);
+      if (typeof seriesRef.current.setData === "function") seriesRef.current.setData([]);
+      if (typeof (seriesRef.current as any).setMarkers === "function") {
+        (seriesRef.current as any).setMarkers([]);
+      }
       return;
     }
-    seriesRef.current.setData(data);
+    if (typeof seriesRef.current.setData === "function") seriesRef.current.setData(data);
     const chartMarkers: SeriesMarker<Time>[] = markers.map((m) => ({
       time: m.time,
       position: m.side === "buy" ? "belowBar" : "aboveBar",
@@ -99,14 +103,16 @@ export default function PortfolioChart({ data, markers = [], height = 350, initi
       color: m.side === "buy" ? colors.positive : colors.negative,
       size: 1,
     }));
-    seriesRef.current.setMarkers(chartMarkers);
+    if (typeof (seriesRef.current as any).setMarkers === "function") {
+      (seriesRef.current as any).setMarkers(chartMarkers);
+    }
   }, [data, markers, colors.positive, colors.negative]);
 
   const [fitMode, setFitMode] = useState(false);
 
   const toggleZoom = useCallback(() => {
     const chart = chartRef.current;
-    if (!chart) return;
+    if (!chart || data.length === 0) return;
     if (fitMode) {
       const len = data.length;
       chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, len - 60), to: len });

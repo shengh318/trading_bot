@@ -29,7 +29,7 @@ export default function Backtest() {
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([...AVAILABLE_SYMBOLS]);
   const [startDate, setStartDate] = useState("2024-01-01");
-  const [initialCash, setInitialCash] = useState("100");
+  const [initialCash, setInitialCash] = useState("10000");
   const [timeframe, setTimeframe] = useState("1Day");
   const [running, setRunning] = useState(false);
   const [pastRuns, setPastRuns] = useState<BacktestRun[]>([]);
@@ -40,11 +40,13 @@ export default function Backtest() {
   const [currentRunId, setCurrentRunId] = useState<number | null>(null);
   const wsRef = useRef<ReturnType<typeof api.createBacktestSocket> | null>(null);
 
-  const markers = trades.map((t) => ({
-    time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
-    side: t.side as "buy" | "sell",
-    symbol: t.symbol,
-  }));
+  const markers = trades
+    .filter((t): t is Trade & { side: "buy" | "sell" } => t.side === "buy" || t.side === "sell")
+    .map((t) => ({
+      time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+      side: t.side,
+      symbol: t.symbol,
+    }));
 
   const toggleSymbol = (sym: string) => {
     setSelectedSymbols((prev) =>
@@ -106,6 +108,9 @@ export default function Backtest() {
     }
   };
 
+  const equityRef = useRef<{ time: import("lightweight-charts").Time; value: number }[]>([]);
+  const tradesRef = useRef<Trade[]>([]);
+
   const runBacktest = useCallback(async () => {
     setRunning(true);
     setEquityPoints([]);
@@ -113,6 +118,12 @@ export default function Backtest() {
     setMetrics(null);
     setLog([]);
     setCurrentRunId(null);
+    equityRef.current = [];
+    tradesRef.current = [];
+
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
 
     const ws = api.createBacktestSocket();
     wsRef.current = ws;
@@ -120,15 +131,15 @@ export default function Backtest() {
     try {
       await ws.connect({
         onBar: (event) => {
-          setEquityPoints((prev) => [
-            ...prev,
-            {
-              time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
-              value: event.equity,
-            },
-          ]);
+          const point = {
+            time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+            value: event.equity,
+          };
+          equityRef.current = [...equityRef.current, point];
+          setEquityPoints(equityRef.current);
           for (const trade of event.trades) {
-            setTrades((prev) => [...prev, trade]);
+            tradesRef.current = [...tradesRef.current, trade];
+            setTrades(tradesRef.current);
             addLog(
               `${trade.side.toUpperCase()} ${Number.isInteger(trade.qty) ? trade.qty : trade.qty.toFixed(4)} ${trade.symbol} @ $${trade.price.toFixed(2)}`,
             );
@@ -146,6 +157,8 @@ export default function Backtest() {
           setRunning(false);
         },
       });
+
+      ws.onClose(() => setRunning(false));
 
       ws.send({
         action: "run",
@@ -170,6 +183,12 @@ export default function Backtest() {
     setMetrics(null);
     setLog([]);
     setCurrentRunId(runId);
+    equityRef.current = [];
+    tradesRef.current = [];
+
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
 
     const ws = api.createBacktestSocket();
     wsRef.current = ws;
@@ -177,15 +196,15 @@ export default function Backtest() {
     try {
       await ws.connect({
           onBar: (event) => {
-          setEquityPoints((prev) => [
-            ...prev,
-            {
-              time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
-              value: event.equity,
-            },
-          ]);
+          const point = {
+            time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+            value: event.equity,
+          };
+          equityRef.current = [...equityRef.current, point];
+          setEquityPoints(equityRef.current);
           for (const trade of event.trades) {
-            setTrades((prev) => [...prev, trade]);
+            tradesRef.current = [...tradesRef.current, trade];
+            setTrades(tradesRef.current);
             addLog(
               `${trade.side.toUpperCase()} ${Number.isInteger(trade.qty) ? trade.qty : trade.qty.toFixed(4)} ${trade.symbol} @ $${trade.price.toFixed(2)}`,
             );
@@ -202,6 +221,8 @@ export default function Backtest() {
           setCurrentRunId(null);
         },
       });
+
+      ws.onClose(() => setRunning(false));
 
       ws.send({ action: "replay", run_id: runId });
     } catch {
@@ -281,7 +302,11 @@ export default function Backtest() {
               value={initialCash}
               onChange={(e) => {
                 const v = e.target.value;
-                if (v === "" || /^\d+(\.\d*)?$/.test(v)) setInitialCash(v);
+                if (v === "") {
+                  setInitialCash("0");
+                } else if (/^\d+(\.\d*)?$/.test(v)) {
+                  setInitialCash(v);
+                }
               }}
               style={{ ...inputStyle, width: 120 }}
             />
@@ -359,37 +384,39 @@ export default function Backtest() {
                           ? `${r.metrics.total_return_pct >= 0 ? "+" : ""}${r.metrics.total_return_pct.toFixed(2)}%`
                           : "-"}
                       </td>
-                       <td style={{ padding: "4px 8px", display: "flex", gap: 4 }}>
-                        <button
-                          onClick={() => replayRun(r.id)}
-                          disabled={running}
-                          style={{
-                            padding: "2px 10px",
-                            background: colors.tabInactive,
-                            color: colors.text,
-                            border: "none",
-                            borderRadius: 4,
-                            cursor: "pointer",
-                            fontSize: 12,
-                          }}
-                        >
-                          Replay
-                        </button>
-                        <button
-                          onClick={() => deleteRun(r.id)}
-                          style={{
-                            padding: "2px 8px",
-                            background: "transparent",
-                            color: colors.negative,
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: 14,
-                            lineHeight: 1,
-                          }}
-                          title="Delete run"
-                        >
-                          ✕
-                        </button>
+                       <td style={{ padding: "4px 8px" }}>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button
+                            onClick={() => replayRun(r.id)}
+                            disabled={running}
+                            style={{
+                              padding: "2px 10px",
+                              background: colors.tabInactive,
+                              color: colors.text,
+                              border: "none",
+                              borderRadius: 4,
+                              cursor: "pointer",
+                              fontSize: 12,
+                            }}
+                          >
+                            Replay
+                          </button>
+                          <button
+                            onClick={() => deleteRun(r.id)}
+                            style={{
+                              padding: "2px 8px",
+                              background: "transparent",
+                              color: colors.negative,
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: 14,
+                              lineHeight: 1,
+                            }}
+                            title="Delete run"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

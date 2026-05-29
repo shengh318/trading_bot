@@ -27,3 +27,6 @@ class Strategy(ABC):
     @abstractmethod
     def next(self, i: int, data: pd.DataFrame, portfolio: Portfolio) -> str:
         pass
+
+    def on_trade(self, side: str, symbol: str, qty: float, price: float) -> None:
+        pass

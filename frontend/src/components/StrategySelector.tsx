@@ -71,13 +71,16 @@ export default function StrategySelector({
             </label>
             <input
               type={p.type === "int" ? "number" : "text"}
-              defaultValue={(params[p.name] ?? p.default) as string | number}
-              onChange={(e) =>
-                onParamChange(
-                  p.name,
-                  p.type === "int" ? parseInt(e.target.value, 10) : e.target.value,
-                )
-              }
+              value={(params[p.name] ?? p.default) as string | number}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (p.type === "int") {
+                  const parsed = parseInt(raw, 10);
+                  onParamChange(p.name, Number.isNaN(parsed) ? 0 : parsed);
+                } else {
+                  onParamChange(p.name, raw);
+                }
+              }}
               style={{ ...inputStyle, width: 120 }}
             />
           </div>

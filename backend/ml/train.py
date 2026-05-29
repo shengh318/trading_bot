@@ -16,12 +16,14 @@ import sys
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import SGDClassifier
+from sklearn.metrics import confusion_matrix
+from sklearn.neural_network import MLPClassifier
 
 try:
     from xgboost import XGBClassifier
@@ -37,8 +39,9 @@ except Exception:
     LGBMClassifier = None  # type: ignore
     HAS_LGB = False
 
-from backend.ml.features import compute_features, get_feature_columns
+from backend.ml.features import compute_features, get_feature_columns, merge_context_features
 from backend.ml.model import save_model, ModelMetadata, MODELS_DIR
+from backend.ml.stacking import StackedEnsemble, MetaLabeledModel, MultiHorizonEnsemble, RegimeAwareModel
 from backend.strategies.base import Portfolio, Signal
 from backend.strategies.sma_crossover import SmaCrossover
 from backend.strategies.simple_strat_1 import SimpleStrat1
@@ -90,7 +93,7 @@ def download_data(symbols: list[str], years: int) -> dict[str, pd.DataFrame]:
         ticker = yf.Ticker(sym)
         df = ticker.history(start=start, end=end, auto_adjust=True)
         if df.empty:
-            print(f"  \u26a0 No data for {sym}, skipping")
+            print(f"  [!] No data for {sym}, skipping")
             continue
         col_map = {
             "Open": "open", "High": "high", "Low": "low",
@@ -99,7 +102,7 @@ def download_data(symbols: list[str], years: int) -> dict[str, pd.DataFrame]:
         df = df.rename(columns=col_map)
         df.index.name = "timestamp"
         data[sym] = df[list(col_map.values())]
-        print(f"    {len(df)} bars  ({df.index[0].date()} \u2192 {df.index[-1].date()})")
+        print(f"    {len(df)} bars  ({df.index[0].date()} -> {df.index[-1].date()})")
     return data
 
 
@@ -109,6 +112,7 @@ def prepare_features(
     triple_barrier_pct: float = 0.02,
     triple_barrier_max_bars: int = 10,
     forecast_horizon: int = 1,
+    context_data_dict: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Compute features for all symbols, combine into a single DataFrame.
 
@@ -118,6 +122,8 @@ def prepare_features(
         triple_barrier_pct: Profit target / stop-loss percentage.
         triple_barrier_max_bars: Max holding period for triple barrier.
         forecast_horizon: Number of bars forward for the binary target.
+        context_data_dict: Optional mapping of context symbol -> OHLCV
+            DataFrame.  Features from these symbols are merged in.
     """
     all_dfs: list[pd.DataFrame] = []
     for sym, df in data_dict.items():
@@ -131,6 +137,10 @@ def prepare_features(
         else:
             d["target"] = (d["close"].shift(-forecast_horizon) > d["close"]).astype(int)
 
+        # ── Cross-symbol features ──
+        if context_data_dict:
+            d = merge_context_features(d, context_data_dict)
+
         all_dfs.append(d)
 
     combined = pd.concat(all_dfs)
@@ -138,9 +148,9 @@ def prepare_features(
     clean = combined.dropna(subset=feature_cols + ["target"])
     if len(clean) < 100:
         raise ValueError(
-            f"Only {len(clean)} clean rows after dropping NaN \u2014 need at least 100"
+            f"Only {len(clean)} clean rows after dropping NaN - need at least 100"
         )
-    clean = clean.sort_index()
+    clean = clean.sort_index(kind="mergesort")
     return clean, feature_cols
 
 
@@ -186,45 +196,104 @@ def train_val_split(
         cutoff_dt = pd.Timestamp(cutoff_date)
         if df.index.tz is not None:
             cutoff_dt = cutoff_dt.tz_localize(df.index.tz)
-        train = df[df.index < cutoff_dt].reset_index(drop=True)
-        val = df[df.index >= cutoff_dt].reset_index(drop=True)
+        train = df[df.index < cutoff_dt]
+        val = df[df.index >= cutoff_dt]
     else:
         split_idx = int(len(df) * val_split)
         cutoff_dt = df.index[split_idx]
-        train = df[df.index < cutoff_dt].reset_index(drop=True)
-        val = df[df.index >= cutoff_dt].reset_index(drop=True)
+        train = df[df.index < cutoff_dt]
+        val = df[df.index >= cutoff_dt]
     return train, val
 
 
 def walk_forward_folds(
     df: pd.DataFrame,
     n_folds: int = 3,
+    cutoff_date: str | None = None,
+    embargo: int = 5,
+    purge_window: int = 1,
 ) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
-    """Create expanding-window walk-forward folds.
+    """Create expanding-window walk-forward folds with purging and embargo.
 
-    Returns list of (train, val) DataFrames.
+    Implements de Prado's purged walk-forward to prevent data leakage
+    between train and test sets:
+
+    - **Purge**: training rows whose label depends on data overlapping
+      with the validation set are removed.
+    - **Embargo**: an additional buffer of *embargo* rows after the purge
+      point is also removed as a safety margin.
+
+    When *cutoff_date* is provided, data before that date is always
+    included in every training fold (base set). Walk-forward folds are
+    created from data on or after the cutoff date.
+
+    Args:
+        df: Combined DataFrame with a ``symbol`` column and datetime index.
+        n_folds: Number of walk-forward folds.
+        cutoff_date: Optional ISO date to separate base set from walk set.
+        embargo: Number of rows to drop after the purge boundary.
+        purge_window: Max label lookahead (``forecast_horizon`` or
+            ``triple_barrier_max_bars``).
+
+    Returns:
+        List of (train, val) DataFrames with purged/embargoed training sets.
     """
-    symbols = df["symbol"].unique()
+    if cutoff_date is not None:
+        cutoff_dt = pd.Timestamp(cutoff_date)
+        if df.index.tz is not None:
+            cutoff_dt = cutoff_dt.tz_localize(df.index.tz)
+        base = df[df.index < cutoff_dt]
+        walk = df[df.index >= cutoff_dt]
+    else:
+        base = None
+        walk = df
+
+    symbols = walk["symbol"].unique()
     folds: list[tuple[pd.DataFrame, pd.DataFrame]] = []
 
+    min_train = 50
+    min_val = 20
     for fold in range(1, n_folds + 1):
-        cutoff = fold / n_folds
         all_train: list[pd.DataFrame] = []
         all_val: list[pd.DataFrame] = []
         for sym in symbols:
-            sym_df = df[df["symbol"] == sym].sort_index()
-            idx = int(len(sym_df) * cutoff)
-            min_train = 50
-            min_val = 20
-            if idx < min_train or len(sym_df) - idx < min_val:
+            sym_df = walk[walk["symbol"] == sym].sort_index()
+            n = len(sym_df)
+            pct = fold / (n_folds + 1)
+            idx = int(n * pct)
+            if idx < min_train:
                 continue
-            all_train.append(sym_df.iloc[:idx].reset_index(drop=True))
-            all_val.append(sym_df.iloc[idx:].reset_index(drop=True))
+            if fold < n_folds:
+                next_idx = int(n * ((fold + 1) / (n_folds + 1)))
+            else:
+                next_idx = n
+            if next_idx - idx < min_val:
+                continue
+            all_train.append(sym_df.iloc[:idx])
+            all_val.append(sym_df.iloc[idx:next_idx])
         if all_train and all_val:
-            folds.append((
-                pd.concat(all_train).reset_index(drop=True),
-                pd.concat(all_val).reset_index(drop=True),
-            ))
+            # ── Per-symbol purge: remove rows whose labels overlap validation ──
+            if purge_window > 0:
+                val_min_ts = pd.concat(all_val).index.min()
+                for i in range(len(all_train)):
+                    sym_train = all_train[i]
+                    unique_ts = sym_train.index.unique().sort_values()
+                    pos = int(unique_ts.searchsorted(val_min_ts, side="left"))
+                    if pos > 0:
+                        cutoff_ts = unique_ts[max(0, pos - purge_window)]
+                        all_train[i] = sym_train[sym_train.index < cutoff_ts]
+
+            # ── Per-symbol embargo ──
+            if embargo > 0:
+                for i in range(len(all_train)):
+                    sym_train = all_train[i]
+                    if len(sym_train) > embargo:
+                        all_train[i] = sym_train.iloc[:-embargo]
+
+            train_parts = [base] + all_train if base is not None else all_train
+            train_df = pd.concat(train_parts)
+
+            folds.append((train_df, pd.concat(all_val)))
     return folds
 
 
@@ -372,13 +441,13 @@ def backtest_baseline(
     """Simplified backtest for rule-based strategies, run per-symbol."""
     symbols = df["symbol"].unique().tolist() if "symbol" in df.columns else ["ASSET"]
     n_syms = len(symbols)
-    cash_per_sym = initial_cash / n_syms
+    cash_per_sym = initial_cash
 
     all_trades: list[dict] = []
     all_equities: list[list[float]] = []
 
     for sym in symbols:
-        sym_df = df[df["symbol"] == sym].copy().reset_index(drop=True)
+        sym_df = df[df["symbol"] == sym].copy()
         if len(sym_df) == 0:
             continue
 
@@ -404,8 +473,13 @@ def backtest_baseline(
                     cost = qty * price
                     portfolio.cash -= cost
                     cost_basis += cost
-                    existing = portfolio.positions.get(sym, 0)
-                    portfolio.positions[sym] = existing + qty
+                    old_shares = portfolio.positions.get(sym, 0)
+                    old_avg = portfolio.avg_entry.get(sym, 0.0)
+                    portfolio.positions[sym] = old_shares + qty
+                    if old_shares > 0 and old_avg > 0:
+                        portfolio.avg_entry[sym] = (old_avg * old_shares + price * qty) / (old_shares + qty)
+                    else:
+                        portfolio.avg_entry[sym] = price
                     trades.append({"side": "buy", "qty": qty, "price": price})
 
             elif signal in (Signal.SELL, Signal.EXIT) and portfolio.positions.get(sym, 0) > 0:
@@ -413,6 +487,7 @@ def backtest_baseline(
                 proceeds = qty * price
                 portfolio.cash += proceeds
                 portfolio.positions[sym] = 0
+                portfolio.avg_entry[sym] = 0.0
                 pnl = proceeds - cost_basis
                 cost_basis = 0.0
                 trades.append({"side": "sell", "qty": qty, "price": price, "pnl": pnl})
@@ -423,9 +498,9 @@ def backtest_baseline(
         all_trades.extend(trades)
         all_equities.append(snapshots)
 
-    min_len = min(len(e) for e in all_equities) if all_equities else 0
+    max_len = max(len(e) for e in all_equities) if all_equities else 0
     merged_equity: list[float] = (
-        [sum(eq[j] for eq in all_equities) for j in range(min_len)]
+        [sum(eq[j] if j < len(eq) else eq[-1] for eq in all_equities) for j in range(max_len)]
         if all_equities else [initial_cash]
     )
 
@@ -533,17 +608,17 @@ def beats_baselines(ml_res: dict, sma_res: dict, simple_res: dict) -> bool:
         and ml_res["sharpe_ratio"] >= simple_res["sharpe_ratio"]
     )
     if beats_ret and beats_shp:
-        print("\n  \u2705 ML beats BOTH baselines on return AND Sharpe!")
+        print("\n  [OK] ML beats BOTH baselines on return AND Sharpe!")
     else:
         if not beats_ret:
             print(
-                f"\n  \u274c ML return ({ml_res['total_return_pct']:.1f}%) "
+                f"\n  [X] ML return ({ml_res['total_return_pct']:.1f}%) "
                 f"vs SmaCrossover ({sma_res['total_return_pct']:.1f}%) / "
                 f"SimpleStrat ({simple_res['total_return_pct']:.1f}%)"
             )
         if not beats_shp:
             print(
-                f"  \u274c ML Sharpe ({ml_res['sharpe_ratio']:.2f}) "
+                f"  [X] ML Sharpe ({ml_res['sharpe_ratio']:.2f}) "
                 f"vs SmaCrossover ({sma_res['sharpe_ratio']:.2f}) / "
                 f"SimpleStrat ({simple_res['sharpe_ratio']:.2f})"
             )
@@ -569,6 +644,8 @@ def train_model(
         model = RandomForestClassifier(
             n_estimators=kwargs.get("n_estimators", 200),
             max_depth=kwargs.get("max_depth", 10),
+            min_samples_leaf=kwargs.get("min_samples_leaf", 1),
+            max_features=kwargs.get("max_features", "sqrt"),
             random_state=42,
             n_jobs=-1,
         )
@@ -579,6 +656,10 @@ def train_model(
             n_estimators=kwargs.get("n_estimators", 200),
             max_depth=kwargs.get("max_depth", 6),
             learning_rate=kwargs.get("learning_rate", 0.1),
+            min_child_weight=kwargs.get("min_child_weight", 1),
+            subsample=kwargs.get("subsample", 1.0),
+            reg_lambda=kwargs.get("reg_lambda", 1),
+            reg_alpha=kwargs.get("reg_alpha", 0),
             random_state=42,
             n_jobs=-1,
             eval_metric="logloss",
@@ -591,15 +672,45 @@ def train_model(
             n_estimators=kwargs.get("n_estimators", 200),
             max_depth=kwargs.get("max_depth", 6),
             learning_rate=kwargs.get("learning_rate", 0.1),
+            min_child_samples=kwargs.get("min_child_samples", 20),
+            subsample=kwargs.get("subsample", 1.0),
+            reg_lambda=kwargs.get("reg_lambda", 0),
+            reg_alpha=kwargs.get("reg_alpha", 0),
             random_state=42,
             n_jobs=-1,
             verbose=-1,
+        )
+    elif model_type == "sgd":
+        model = SGDClassifier(
+            loss=kwargs.get("loss", "log_loss"),
+            penalty=kwargs.get("penalty", "l2"),
+            alpha=kwargs.get("alpha", 0.0001),
+            max_iter=kwargs.get("max_iter", 1000),
+            tol=kwargs.get("tol", 1e-3),
+            learning_rate=kwargs.get("learning_rate_sgd", "optimal"),
+            eta0=kwargs.get("eta0", 0.01),
+            random_state=42,
+            n_jobs=-1,
+        )
+    elif model_type == "mlp":
+        model = MLPClassifier(
+            hidden_layer_sizes=kwargs.get("hidden_layer_sizes", (128, 64, 32)),
+            activation=kwargs.get("activation", "relu"),
+            alpha=kwargs.get("alpha_mlp", 0.001),
+            batch_size=kwargs.get("batch_size", 32),
+            learning_rate_init=kwargs.get("learning_rate_init", 0.001),
+            max_iter=kwargs.get("max_iter", 500),
+            early_stopping=kwargs.get("early_stopping", True),
+            validation_fraction=0.1,
+            random_state=42,
         )
     else:
         model = GradientBoostingClassifier(
             n_estimators=kwargs.get("n_estimators", 200),
             max_depth=kwargs.get("max_depth", 5),
             learning_rate=kwargs.get("learning_rate", 0.1),
+            min_samples_leaf=kwargs.get("min_samples_leaf", 1),
+            subsample=kwargs.get("subsample", 1.0),
             random_state=42,
         )
     model.fit(X, y)
@@ -612,8 +723,19 @@ def evaluate_models(
     feature_cols: list[str],
     model_types: list[str],
     params: dict,
+    stacking: bool = False,
+    meta_labeling: bool = False,
+    multi_horizon: list[int] | None = None,
+    regime_aware: bool = False,
 ) -> list[tuple[str, object, dict]]:
-    """Train + backtest each model type, return (label, model, results) list."""
+    """Train + backtest each model type, return (label, model, results) list.
+
+    When *stacking* is ``True``, also builds a ``StackedEnsemble`` from all
+    trained base models and includes it as an additional result entry.
+
+    When *meta_labeling* is ``True``, wraps each model with a
+    ``MetaLabeledModel`` that filters low-conviction predictions.
+    """
     base_buy = params.get("base_buy_size", 1000)
     conf = params.get("confidence_threshold", 0.55)
     use_kelly = params.get("use_kelly", False)
@@ -623,9 +745,35 @@ def evaluate_models(
 
     for mt in model_types:
         label = {"rf": "RandomForest", "gbt": "GradientBoosting",
-                 "xgb": "XGBoost", "lgb": "LightGBM"}.get(mt, mt.upper())
+                 "xgb": "XGBoost", "lgb": "LightGBM", "sgd": "SGD",
+                 "mlp": "MLP"}.get(mt, mt.upper())
         print(f"  Training {label} ...")
         model = train_model(train_df, feature_cols, mt, **params)
+
+        if meta_labeling:
+            print(f"  Fitting meta-labeler for {label} ...")
+            wrapper = MetaLabeledModel(model)
+            wrapper.fit_meta(train_df[feature_cols], train_df["target"])
+            model = wrapper
+            label = f"{label}+Meta"
+
+        if regime_aware:
+            model = RegimeAwareModel(model)
+            label = f"{label}+Regime"
+
+        # ── Overfitting detection ──
+        train_acc = model.score(train_df[feature_cols], train_df["target"])
+        val_acc = model.score(val_df[feature_cols], val_df["target"])
+        gap = train_acc - val_acc
+        warning = " << OVERFITTING" if gap > 0.10 else ""
+        print(f"    Train acc: {train_acc:.1%}  Val acc: {val_acc:.1%}  Gap: {gap:.1%}{warning}")
+        cm = confusion_matrix(val_df["target"], model.predict(val_df[feature_cols]))
+        tn, fp, fn, tp = cm.ravel()
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+        print(f"    Val: prec={prec:.1%} recall={rec:.1%} f1={f1:.1%}")
+
         print(f"  Backtesting {label} ...")
         res = backtest_model(
             val_df, feature_cols, model, conf, base_buy,
@@ -633,7 +781,102 @@ def evaluate_models(
         )
         results.append((label, model, res))
 
+    # ── Multi-horizon ensemble (C8) ──
+    if multi_horizon and len(multi_horizon) >= 2:
+        for mt in model_types:
+            mt_label = {"rf": "RF", "gbt": "GBT", "xgb": "XGB", "lgb": "LGB", "sgd": "SGD", "mlp": "MLP"}.get(mt, mt.upper())
+            lab = f"MH-{mt_label}({','.join(str(h) for h in multi_horizon)})"
+            print(f"  Training {lab} ...")
+            try:
+                ensemble = MultiHorizonEnsemble(
+                    horizons=multi_horizon,
+                    base_model_type=mt,
+                    base_params=params,
+                )
+                ensemble.fit(train_df, feature_cols=feature_cols)
+                res = backtest_model(
+                    val_df, feature_cols, ensemble, conf, base_buy,
+                    use_kelly=use_kelly, max_hold_bars=max_hold, trailing_stop_pct=trail,
+                )
+                results.append((lab, ensemble, res))
+                print(f"         -> Return={res['total_return_pct']:.1f}%  "
+                      f"Sharpe={res['sharpe_ratio']:.2f}")
+            except Exception as e:
+                print(f"    [!] Multi-horizon ensemble failed: {e}")
+
+    # ── Stacking ensemble ──
+    if stacking and len(results) >= 2:
+        base_models: dict[str, object] = {}
+        for label, model, _ in results:
+            if isinstance(model, MultiHorizonEnsemble):
+                continue
+            key = label.split()[-1].lower()
+            base_models[key] = model
+        print(f"  Building StackingEnsemble ({len(base_models)} base models) ...")
+        stacker = StackedEnsemble(base_models)
+        stacker.fit(train_df[feature_cols], train_df["target"])
+        label = "StackingEnsemble"
+        model_out: object = stacker
+        if regime_aware:
+            model_out = RegimeAwareModel(stacker)
+            label = f"{label}+Regime"
+        print(f"  Backtesting {label} ...")
+        stack_res = backtest_model(
+            val_df, feature_cols, model_out, conf, base_buy,
+            use_kelly=use_kelly, max_hold_bars=max_hold, trailing_stop_pct=trail,
+        )
+        results.append((label, model_out, stack_res))
+
     return results
+
+
+def _stacking_after_grid(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    feature_cols: list[str],
+    model_types: list[str],
+    best_combo: dict,
+    best_res: dict,
+    params: dict,
+) -> tuple[object | None, dict | None]:
+    """If ``--stacking`` was requested, build a StackingEnsemble using
+    all model types trained with the best grid-search combo's params.
+    Returns (stacker, stack_res) if the ensemble beats the grid winner
+    by Sharpe, else (None, None).
+    """
+    if len(model_types) < 2:
+        return None, None
+
+    conf = params.get("confidence_threshold", 0.55)
+    base_buy = params.get("base_buy_size", 1000)
+    use_kelly = params.get("use_kelly", False)
+    max_hold = params.get("max_hold_bars", 30)
+    trail = params.get("trailing_stop_pct", 0.05)
+
+    # Train all model types with best combo params
+    base_models: dict[str, object] = {}
+    combo_params = {k: v for k, v in best_combo.items() if k != "model_type"}
+    for mt in model_types:
+        m = train_model(train_df, feature_cols, mt, **combo_params)
+        base_models[mt] = m
+
+    print(f"  Building StackingEnsemble from grid winner ...")
+    stacker = StackedEnsemble(base_models)
+    stacker.fit(train_df[feature_cols], train_df["target"])
+
+    print(f"  Backtesting StackingEnsemble ...")
+    stack_res = backtest_model(
+        val_df, feature_cols, stacker, conf, base_buy,
+        use_kelly=use_kelly, max_hold_bars=max_hold, trailing_stop_pct=trail,
+    )
+    print(f"         -> Return={stack_res['total_return_pct']:.1f}%  "
+          f"Sharpe={stack_res['sharpe_ratio']:.2f}  "
+          f"(grid winner: {best_res['sharpe_ratio']:.2f})")
+
+    if stack_res["sharpe_ratio"] > best_res["sharpe_ratio"]:
+        print(f"  [>>] StackingEnsemble beats grid winner!")
+        return stacker, stack_res
+    return None, None
 
 
 def _baseline_results(
@@ -652,21 +895,160 @@ def _baseline_results(
     return {"SmaCrossover": sma, "SimpleStrat_1": simple}
 
 
+def _infer_model_type(model) -> str:
+    """Return short model type string (rf/gbt/xgb/lgb) from a model instance."""
+    name = type(model).__name__.lower()
+    if "randomforest" in name:
+        return "rf"
+    if "gradientboosting" in name:
+        return "gbt"
+    if "xgboost" in name or "xgb" in name:
+        return "xgb"
+    if "lightgbm" in name or "lgbm" in name or "lgb" in name:
+        return "lgb"
+    if "sgd" in name or "SGD" in name:
+        return "sgd"
+    if "mlp" in name:
+        return "mlp"
+    return "rf"
+
+
+def _try_prune(
+    model,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    feature_cols: list[str],
+    params: dict,
+    threshold: float,
+) -> tuple[list[str], object | None, dict | None]:
+    """Drop bottom *threshold* features by importance, retrain, compare.
+
+    Returns ``(new_feature_cols, pruned_model, pruned_results)`` if the
+    pruned model improves Sharpe on validation, otherwise returns
+    the original ``(feature_cols, None, None)``.
+    """
+    if threshold <= 0 or not hasattr(model, "feature_importances_"):
+        return feature_cols, None, None
+
+    # StackedEnsemble returns meta-coeffs — skip feature-level pruning
+    if hasattr(model, "base_models"):
+        return feature_cols, None, None
+
+    imp = model.feature_importances_
+    if len(imp) != len(feature_cols):
+        return feature_cols, None, None
+
+    threshold_val = float(np.quantile(imp, threshold))
+    kept = [c for c, i in zip(feature_cols, imp) if i > threshold_val]
+
+    # Don't drop more than 50% of features
+    if len(kept) < len(feature_cols) * 0.5:
+        return feature_cols, None, None
+
+    dropped = list(set(feature_cols) - set(kept))
+    if not dropped:
+        return feature_cols, None, None
+
+    print(f"  Pruning: dropping {len(dropped)} features "
+          f"({', '.join(sorted(dropped)[:6])}{'...' if len(dropped) > 6 else ''})")
+
+    # Retrain with pruned features
+    mt = _infer_model_type(model)
+    train_pruned = train_df[kept + ["target", "symbol"]] if "symbol" in train_df.columns else train_df[kept + ["target"]]
+    val_pruned = val_df[kept + ["target", "symbol"]] if "symbol" in val_df.columns else val_df[kept + ["target"]]
+
+    pruned_model = train_model(train_pruned, kept, mt, **params)
+
+    conf = params.get("confidence_threshold", 0.55)
+    base_buy = params.get("base_buy_size", 1000)
+    use_kelly = params.get("use_kelly", False)
+    max_hold = params.get("max_hold_bars", 30)
+    trail = params.get("trailing_stop_pct", 0.05)
+
+    pruned_res = backtest_model(
+        val_pruned, kept, pruned_model, conf, base_buy,
+        use_kelly=use_kelly, max_hold_bars=max_hold, trailing_stop_pct=trail,
+    )
+
+    # Recompute original result for fair comparison (in case best_res was from grid)
+    print(f"    Pruned -> Return={pruned_res['total_return_pct']:.1f}%  "
+          f"Sharpe={pruned_res['sharpe_ratio']:.2f}")
+
+    return kept, pruned_model, pruned_res
+
+
 # ── Grid search ───────────────────────────────────────────────────────────
 
-def _grid_params(model_types: list[str]) -> list[dict]:
+def _grid_params(model_types: list[str], regularize: bool = False) -> list[dict]:
     combos: list[dict] = []
     for mt in model_types:
-        for n in [100, 200, 300]:
-            for d in [5, 8, 12]:
-                if mt in ("gbt", "xgb", "lgb"):
-                    for lr in [0.05, 0.1, 0.2]:
-                        combos.append(dict(model_type=mt, n_estimators=n,
-                                           max_depth=d, learning_rate=lr))
-                else:
-                    combos.append(dict(model_type=mt, n_estimators=n,
-                                       max_depth=d))
+        if mt == "sgd":
+            for penalty in ["l2", "l1"]:
+                for alpha in [0.0001, 0.001, 0.01]:
+                    for lr_sgd in ["optimal", "adaptive"]:
+                        combos.append(dict(
+                            model_type=mt, penalty=penalty,
+                            alpha=alpha, learning_rate_sgd=lr_sgd,
+                            eta0=0.01,
+                        ))
+        elif mt == "mlp":
+            for hidden in ["(64, 32)", "(128, 64, 32)", "(256, 128, 64)"]:
+                for alpha_mlp in [0.0001, 0.001]:
+                    for lr_init in [0.001, 0.01]:
+                        combos.append(dict(
+                            model_type=mt,
+                            hidden_layer_sizes=eval(hidden),
+                            alpha_mlp=alpha_mlp,
+                            learning_rate_init=lr_init,
+                        ))
+        else:
+            for n in [100, 200, 300]:
+                for d in [5, 8, 12]:
+                    if mt in ("gbt", "xgb", "lgb"):
+                        for lr in [0.05, 0.1, 0.2]:
+                            base = dict(model_type=mt, n_estimators=n,
+                                        max_depth=d, learning_rate=lr)
+                            if regularize:
+                                _add_reg_params(mt, base, combos)
+                            else:
+                                combos.append(base)
+                    else:
+                        base = dict(model_type=mt, n_estimators=n, max_depth=d)
+                        if regularize:
+                            _add_reg_params(mt, base, combos)
+                        else:
+                            combos.append(base)
     return combos
+
+
+def _add_reg_params(mt: str, base: dict, combos: list[dict]) -> None:
+    """Add regularization-focused param combos for a given base config."""
+    if mt == "rf":
+        for msl in [1, 5]:
+            for mf in ["sqrt", "log2"]:
+                c = dict(base)
+                c.update(min_samples_leaf=msl, max_features=mf)
+                combos.append(c)
+    elif mt == "gbt":
+        for msl in [1, 5]:
+            for ss in [0.8, 1.0]:
+                c = dict(base)
+                c.update(min_samples_leaf=msl, subsample=ss)
+                combos.append(c)
+    elif mt == "xgb":
+        for mcw in [1, 5]:
+            for ss in [0.8, 1.0]:
+                for rl in [0, 1]:
+                    c = dict(base)
+                    c.update(min_child_weight=mcw, subsample=ss, reg_lambda=rl)
+                    combos.append(c)
+    elif mt == "lgb":
+        for mcs in [5, 20]:
+            for ss in [0.8, 1.0]:
+                for rl in [0, 1]:
+                    c = dict(base)
+                    c.update(min_child_samples=mcs, subsample=ss, reg_lambda=rl)
+                    combos.append(c)
 
 
 def grid_search(
@@ -675,6 +1057,8 @@ def grid_search(
     feature_cols: list[str],
     params: dict,
     model_types: list[str],
+    regularize: bool = False,
+    meta_labeling: bool = False,
 ) -> tuple:
     """Try every hyperparameter combo, return the best model + its results."""
     conf = params.get("confidence_threshold", 0.55)
@@ -682,7 +1066,7 @@ def grid_search(
     use_kelly = params.get("use_kelly", False)
     max_hold = params.get("max_hold_bars", 30)
     trail = params.get("trailing_stop_pct", 0.05)
-    combos = _grid_params(model_types)
+    combos = _grid_params(model_types, regularize=regularize)
 
     best_model = None
     best_res: dict | None = None
@@ -692,18 +1076,42 @@ def grid_search(
         mt = c["model_type"]
         mt_label = {"rf": "RF", "gbt": "GBT", "xgb": "XGB", "lgb": "LGB"}.get(mt, mt.upper())
         lr_str = f" lr={c.get('learning_rate', '-')}" if "learning_rate" in c else ""
-        print(f"  [{i+1}/{len(combos)}] {mt_label} n={c['n_estimators']} "
-              f"depth={c['max_depth']}{lr_str}")
+        reg_str = ""
+        if regularize:
+            extra = []
+            for k in ("min_samples_leaf", "max_features", "subsample",
+                      "min_child_weight", "min_child_samples", "reg_lambda"):
+                if k in c:
+                    extra.append(f"{k.split('_')[-1]}={c[k]}")
+            reg_str = " " + " ".join(extra) if extra else ""
+        meta_str = " [M]" if meta_labeling else ""
+        n_est_str = f"n={c.get('n_estimators', '-')} "
+        depth_str = f"depth={c.get('max_depth', '-')} "
+        print(f"  [{i+1}/{len(combos)}] {mt_label} {n_est_str}"
+              f"{depth_str}{lr_str}{reg_str}{meta_str}")
 
         model = train_model(train_df, feature_cols, **c)
+
+        if meta_labeling:
+            wrapper = MetaLabeledModel(model)
+            wrapper.fit_meta(train_df[feature_cols], train_df["target"])
+            model = wrapper
+
+        # ── Overfitting detection ──
+        train_acc = model.score(train_df[feature_cols], train_df["target"])
+        val_acc = model.score(val_df[feature_cols], val_df["target"])
+        gap = train_acc - val_acc
+        warning = " << OVERFITTING" if gap > 0.10 else ""
+
         res = backtest_model(
             val_df, feature_cols, model, conf, base_buy,
             use_kelly=use_kelly,
             max_hold_bars=max_hold,
             trailing_stop_pct=trail,
         )
-        print(f"         \u2192 Return={res['total_return_pct']:.1f}%  "
-              f"Sharpe={res['sharpe_ratio']:.2f}")
+        print(f"         -> Return={res['total_return_pct']:.1f}%  "
+              f"Sharpe={res['sharpe_ratio']:.2f}  "
+              f"Acc={train_acc:.1%}/{val_acc:.1%}{warning}")
 
         if best_res is None or res["sharpe_ratio"] > best_res["sharpe_ratio"]:
             best_model = model
@@ -713,8 +1121,9 @@ def grid_search(
     label = {"rf": "RF", "gbt": "GBT", "xgb": "XGB", "lgb": "LGB"}.get(
         best_combo["model_type"], best_combo["model_type"].upper()
     )
-    print(f"\n  \u2b50 Grid search winner: {label} n={best_combo['n_estimators']} "
-          f"depth={best_combo['max_depth']} "
+    print(f"\n  [*] Grid search winner: {label} "
+          f"n={best_combo.get('n_estimators', '-')} "
+          f"depth={best_combo.get('max_depth', '-')} "
           f"lr={best_combo.get('learning_rate', '-')}")
     return best_model, best_res, best_combo
 
@@ -731,7 +1140,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--name", default="multi_symbol_model",
                    help="Model name for saving (default: multi_symbol_model)")
     p.add_argument("--model-types", default="rf,gbt",
-                   help="Comma-separated model types: rf,gbt,xgb,lgb (default: rf,gbt)")
+                   help="Comma-separated model types: rf,gbt,xgb,lgb,sgd,mlp (default: rf,gbt)")
     p.add_argument("--n-estimators", type=int, default=200)
     p.add_argument("--max-depth", type=int, default=10)
     p.add_argument("--learning-rate", type=float, default=0.1)
@@ -755,12 +1164,32 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--labeling", default="next_bar",
                    choices=["next_bar", "triple_barrier"],
                    help="Labeling method (default: next_bar)")
+    p.add_argument("--triple-barrier-pct", type=float, default=0.02,
+                   help="Profit target / stop-loss %% for triple barrier (default: 0.02)")
+    p.add_argument("--triple-barrier-max-bars", type=int, default=10,
+                   help="Max holding period bars for triple barrier (default: 10)")
     p.add_argument("--forecast-horizon", type=int, default=1,
                    help="Number of days forward for target prediction (default: 1)")
     p.add_argument("--max-hold-bars", type=int, default=30,
                    help="Max bars to hold a position before forced exit (default: 30)")
     p.add_argument("--trailing-stop-pct", type=float, default=0.05,
                    help="Trailing stop loss as fraction (default: 0.05 = 5%%)")
+    p.add_argument("--stacking", action="store_true",
+                   help="Build a StackingEnsemble from all model types and compare against individuals")
+    p.add_argument("--meta-labeling", action="store_true",
+                   help="Two-stage: primary predicts direction, meta-model filters false signals")
+    p.add_argument("--regime-aware", action="store_true",
+                   help="Wrap model with RegimeAwareModel to adjust predictions by market regime")
+    p.add_argument("--prune", type=float, default=0.0,
+                   help="Drop bottom N%% features by importance, retrain, keep if better (default: 0 = off)")
+    p.add_argument("--regularize", action="store_true",
+                   help="Add regularization params (min_samples_leaf, subsample, etc.) to grid search")
+    p.add_argument("--embargo", type=int, default=5,
+                   help="Embargo buffer rows for purged walk-forward (default: 5)")
+    p.add_argument("--multi-horizon", default=None,
+                   help="Comma-separated forecast horizons for multi-horizon ensemble (e.g. 1,5,21)")
+    p.add_argument("--context-symbols", default=None,
+                   help="Comma-separated context symbols (e.g. SPY,VOO) for cross-symbol features")
     p.add_argument("--model-dir", default=str(MODELS_DIR),
                    help=f"Output dir (default: {MODELS_DIR})")
     return p.parse_args()
@@ -774,14 +1203,21 @@ def main() -> None:
     model_types = [s.strip() for s in args.model_types.split(",")]
 
     for mt in model_types:
-        if mt not in ("rf", "gbt", "xgb", "lgb"):
-            print(f"ERROR: Unknown model type '{mt}'. Choose from: rf, gbt, xgb, lgb")
+        if mt not in ("rf", "gbt", "xgb", "lgb", "sgd", "mlp"):
+            print(f"ERROR: Unknown model type '{mt}'. Choose from: rf, gbt, xgb, lgb, sgd, mlp")
             sys.exit(1)
         if mt == "xgb" and not HAS_XGB:
             print("ERROR: xgboost not installed. Run: pip install xgboost")
             sys.exit(1)
         if mt == "lgb" and not HAS_LGB:
             print("ERROR: lightgbm not installed. Run: pip install lightgbm")
+            sys.exit(1)
+
+    mh_horizons: list[int] | None = None
+    if args.multi_horizon:
+        mh_horizons = [int(h) for h in args.multi_horizon.split(",")]
+        if len(mh_horizons) < 2:
+            print(f"ERROR: --multi-horizon requires at least 2 horizons")
             sys.exit(1)
 
     print(f"\n{'='*60}")
@@ -795,12 +1231,27 @@ def main() -> None:
     print(f"  Grid:        {'ON' if args.grid_search else 'OFF'}")
     print(f"  Walk-forward:{'ON (' + str(args.walk_forward) + ' folds)' if args.walk_forward else 'OFF'}")
     print(f"  Kelly:       {'ON' if args.kelly else 'OFF'}")
-    print(f"  Auto-τ:      {'ON' if args.auto_threshold else 'OFF'}")
+    print(f"  Auto-thresh: {'ON' if args.auto_threshold else 'OFF'}")
+    print(f"  Stacking:    {'ON' if args.stacking else 'OFF'}")
+    print(f"  Meta-label:  {'ON' if args.meta_labeling else 'OFF'}")
+    print(f"  Regime-aware:{'ON' if args.regime_aware else 'OFF'}")
+    print(f"  Regularize:  {'ON' if args.regularize else 'OFF'}")
+    print(f"  Embargo:     {args.embargo}")
     print(f"  Labeling:    {args.labeling}")
     print(f"  Horizon:     {args.forecast_horizon}-day")
     print(f"  Max hold:    {args.max_hold_bars} bars")
     print(f"  Trail stop:  {args.trailing_stop_pct*100:.0f}%")
+    print(f"  Prune:       {'ON (' + str(int(args.prune * 100)) + '%)' if args.prune > 0 else 'OFF'}")
+    print(f"  Multi-horiz: {args.multi_horizon or 'OFF'}")
+    print(f"  Context:     {args.context_symbols or 'OFF'}")
     print(f"{'='*60}\n")
+
+    # ── Context symbols (C3) ──
+    context_symbols: list[str] = []
+    context_data: dict[str, pd.DataFrame] | None = None
+    if args.context_symbols:
+        context_symbols = [s.strip().upper() for s in args.context_symbols.split(",")]
+        print(f"  Context symbols: {', '.join(context_symbols)}")
 
     # ── 1. Download ──
     print("Step 1/5: Downloading data ...")
@@ -809,11 +1260,18 @@ def main() -> None:
         print("ERROR: No data downloaded.")
         sys.exit(1)
 
+    if context_symbols:
+        print("  Downloading context symbol data ...")
+        context_data = download_data(context_symbols, args.years)
+
     # ── 2. Prepare features ──
     print("\nStep 2/5: Computing features ...")
     full_df, feature_cols = prepare_features(
         data_dict, labeling=args.labeling,
+        triple_barrier_pct=args.triple_barrier_pct,
+        triple_barrier_max_bars=args.triple_barrier_max_bars,
         forecast_horizon=args.forecast_horizon,
+        context_data_dict=context_data,
     )
 
     print(f"  Total samples: {len(full_df)}")
@@ -836,7 +1294,11 @@ def main() -> None:
     print(f"\nStep 3/5: {'Grid search' if args.grid_search else 'Training'} ...")
 
     if args.walk_forward:
-        folds = walk_forward_folds(full_df, n_folds=args.walk_forward)
+        purge = max(args.forecast_horizon, args.triple_barrier_max_bars if args.labeling == "triple_barrier" else 1)
+        folds = walk_forward_folds(
+            full_df, n_folds=args.walk_forward, cutoff_date=args.cutoff_date,
+            embargo=args.embargo, purge_window=purge,
+        )
         if not folds:
             print("ERROR: No valid walk-forward folds created.")
             sys.exit(1)
@@ -855,11 +1317,26 @@ def main() -> None:
             if args.grid_search:
                 best_model, best_res, best_combo = grid_search(
                     train_fold, val_fold, feature_cols, params, model_types,
+                    regularize=args.regularize,
+                    meta_labeling=args.meta_labeling,
                 )
                 label = f"GridSearch ({best_combo['model_type']})"
+                if args.stacking:
+                    s_model, s_res = _stacking_after_grid(
+                        train_fold, val_fold, feature_cols, model_types,
+                        best_combo, best_res, params,
+                    )
+                    if s_model is not None:
+                        best_model = s_model
+                        best_res = s_res
+                        label = "StackingEnsemble"
             else:
                 results = evaluate_models(
                     train_fold, val_fold, feature_cols, model_types, params,
+                    stacking=args.stacking,
+                    meta_labeling=args.meta_labeling,
+                    multi_horizon=mh_horizons,
+                    regime_aware=args.regime_aware,
                 )
                 best_label, best_model, best_res = max(results, key=lambda x: x[2]["sharpe_ratio"])
                 label = best_label
@@ -894,16 +1371,30 @@ def main() -> None:
         # Retrain on ALL data with best model type from last fold
         print("\n  Retraining on full dataset ...")
         final_model_type = all_ml_labels[-1].lower()
-        # map label back to model type key
+        import re
+        m = re.search(r'\((\w+)\)', final_model_type)
+        if m:
+            final_model_type = m.group(1)
         type_map = {"randomforest": "rf", "gradientboosting": "gbt",
-                     "xgboost": "xgb", "lightgbm": "lgb"}
+                     "xgboost": "xgb", "lightgbm": "lgb",
+                     "sgd": "sgd", "mlp": "mlp",
+                     "rf": "rf", "gbt": "gbt", "xgb": "xgb", "lgb": "lgb",
+                     "sgd": "sgd", "mlp": "mlp"}
         for k, v in type_map.items():
             if k in final_model_type:
                 final_model_type = v
                 break
         last_model = train_model(full_df, feature_cols, final_model_type, **params)
         best_model = last_model
-        best_res = avg_ml
+        full_res = backtest_model(
+            full_df, feature_cols, last_model,
+            params.get("confidence_threshold", 0.55),
+            params.get("base_buy_size", 1000),
+            use_kelly=params.get("use_kelly", False),
+            max_hold_bars=params.get("max_hold_bars", 30),
+            trailing_stop_pct=params.get("trailing_stop_pct", 0.05),
+        )
+        best_res = full_res
         model_type = all_ml_labels[-1]
 
         # Retrain baselines on full val set for comparison (use last fold's val)
@@ -911,8 +1402,10 @@ def main() -> None:
         simple_res = avg_simple
         ml_wins = beats_baselines(best_res, sma_res, simple_res)
 
-        # Update params for save
-        params["walk_forward_folds"] = args.walk_forward
+        num_train_samples = len(full_df)
+        num_val_samples = int(sum(len(v) for _, v in folds) / len(folds))
+        train_params_for_save = dict(params)
+        train_params_for_save["walk_forward_folds"] = args.walk_forward
 
     else:
         # Single train/val split
@@ -920,10 +1413,14 @@ def main() -> None:
             full_df, args.val_split, cutoff_date=args.cutoff_date,
         )
         print(f"\n  Train: {len(train_df)} samples, Val: {len(val_df)} samples")
+        num_train_samples = len(train_df)
+        num_val_samples = len(val_df)
 
         if args.grid_search:
             best_model, best_res, best_combo = grid_search(
                 train_df, val_df, feature_cols, params, model_types,
+                regularize=args.regularize,
+                meta_labeling=args.meta_labeling,
             )
             if args.auto_threshold:
                 tuned_t, tuned_res = tune_confidence_threshold(
@@ -932,25 +1429,40 @@ def main() -> None:
                     max_hold_bars=args.max_hold_bars,
                     trailing_stop_pct=args.trailing_stop_pct,
                 )
-                print(f"\n  \U0001f3af Auto-tuned confidence threshold: {tuned_t} "
+                print(f"\n  [>>] Auto-tuned confidence threshold: {tuned_t} "
                       f"(Sharpe: {tuned_res['sharpe_ratio']:.2f})")
                 params["confidence_threshold"] = tuned_t
                 best_res = tuned_res
+
+            if args.stacking:
+                s_model, s_res = _stacking_after_grid(
+                    train_df, val_df, feature_cols, model_types,
+                    best_combo, best_res, params,
+                )
+                if s_model is not None:
+                    best_model = s_model
+                    best_res = s_res
+                    model_type = "StackingEnsemble (grid)"
+                else:
+                    model_type = f"GridSearch ({best_combo['model_type']})"
+            else:
+                model_type = f"GridSearch ({best_combo['model_type']})"
 
             baselines = _baseline_results(val_df)
             sma_res = baselines["SmaCrossover"]
             simple_res = baselines["SimpleStrat_1"]
 
-            dummy = {"total_return_pct": 0, "sharpe_ratio": 0,
-                     "win_rate_pct": 0, "max_drawdown_pct": 0, "num_trades": 0}
             print_comparison([
-                (f"GridSearch ({best_combo['model_type']})", best_res),
+                (model_type, best_res),
             ] + list(baselines.items()))
             ml_wins = beats_baselines(best_res, sma_res, simple_res)
-            model_type = f"GridSearch ({best_combo['model_type']})"
         else:
             results = evaluate_models(
                 train_df, val_df, feature_cols, model_types, params,
+                stacking=args.stacking,
+                meta_labeling=args.meta_labeling,
+                multi_horizon=mh_horizons,
+                regime_aware=args.regime_aware,
             )
             baselines = _baseline_results(val_df)
             sma_res = baselines["SmaCrossover"]
@@ -961,7 +1473,7 @@ def main() -> None:
             best_res = None
             best_label = ""
             for label, model, res in results:
-                all_rows.append((f"ML \u2014 {label}", res))
+                all_rows.append((f"ML - {label}", res))
                 if best_res is None or res["sharpe_ratio"] > best_res["sharpe_ratio"]:
                     best_model = model
                     best_res = res
@@ -977,7 +1489,7 @@ def main() -> None:
                     max_hold_bars=args.max_hold_bars,
                     trailing_stop_pct=args.trailing_stop_pct,
                 )
-                print(f"\n  \U0001f3af Auto-tuned confidence threshold: {tuned_t} "
+                print(f"\n  [>>] Auto-tuned confidence threshold: {tuned_t} "
                       f"(Sharpe: {tuned_res['sharpe_ratio']:.2f})")
                 params["confidence_threshold"] = tuned_t
                 best_res = tuned_res
@@ -985,32 +1497,50 @@ def main() -> None:
             model_type = best_label
             ml_wins = beats_baselines(best_res, sma_res, simple_res)
 
+    # ── 3.5. Feature pruning ──
+    if args.prune > 0 and best_model is not None:
+        pruned_cols, pruned_model, pruned_res = _try_prune(
+            best_model, full_df if args.walk_forward else train_df,
+            full_df if args.walk_forward else val_df,
+            feature_cols, params, args.prune,
+        )
+        if pruned_model is not None and pruned_res is not None:
+            if pruned_res["sharpe_ratio"] > best_res["sharpe_ratio"]:
+                print(f"    [>>] Pruned model beats original — keeping {len(pruned_cols)} features")
+                best_model = pruned_model
+                best_res = pruned_res
+                feature_cols = pruned_cols
+            else:
+                print(f"    [-] Pruned model did not beat original — keeping original")
+
     # ── 4. Save decision ──
     print(f"\nStep 4/5: Save decision ...")
     should_save = not args.beat_baselines or ml_wins
 
     if should_save and best_model is not None:
+        saved_params = train_params_for_save if args.walk_forward else dict(params)
         metadata = ModelMetadata(
             feature_columns=feature_cols,
             model_type=model_type,
-            params=args.__dict__,
+            params=saved_params,
             train_symbols=symbols,
             train_years=args.years,
-            num_train_samples=len(full_df),
-            num_val_samples=0,
+            num_train_samples=num_train_samples,
+            num_val_samples=num_val_samples,
             validation_metrics=best_res,
             baseline_comparison={
                 "SmaCrossover": sma_res,
                 "SimpleStrat_1": simple_res,
             },
             beat_baselines=ml_wins,
+            context_symbols=context_symbols,
         )
         path = save_model(best_model, args.name, metadata, args.model_dir)
-        print(f"  \u2705 Saved to: {path}")
+        print(f"  [OK] Saved to: {path}")
         if ml_wins:
-            print(f"  \U0001f3c6 Champion model '{args.name}' beats both baselines!")
+            print(f"  [TROPHY] Champion model '{args.name}' beats both baselines!")
     else:
-        print(f"  \u274c Model did NOT beat baselines. Nothing saved.")
+        print(f"  [X] Model did NOT beat baselines. Nothing saved.")
 
     # ── 5. Feature importance ──
     print(f"\nStep 5/5: Feature importance (top 10) ...")

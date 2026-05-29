@@ -95,18 +95,19 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
     snapshots_batch: list[dict] = []
 
     for event in engine.stream():
+        bar_trades = event.get("trade", [])
         msg: dict = {
             "type": "bar",
             "bar_index": event["snapshot"]["bar_index"],
             "timestamp": event["snapshot"]["timestamp"],
             "equity": event["snapshot"]["equity"],
             "cash": event["snapshot"]["cash"],
-            "trades": event["trades"],
+            "trades": bar_trades,
         }
 
         await websocket.send_json(msg)
 
-        trades_batch.extend(event["trades"])
+        trades_batch.extend(bar_trades if isinstance(bar_trades, list) else [bar_trades] if bar_trades else [])
         snapshots_batch.append(event["snapshot"])
 
     db = get_db()
@@ -119,7 +120,7 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
     symbols_str = ",".join(symbols)
     run_id = db.save_backtest_run({
         "strategy_name": data["strategy_name"],
-        "parameters": json.dumps(data.get("parameters")),
+        "parameters": json.dumps(data.get("parameters")) if data.get("parameters") else None,
         "symbol": symbols_str,
         "start_date": data["start_date"],
         "end_date": data.get("end_date") or end.date().isoformat(),
@@ -159,13 +160,14 @@ async def _handle_replay(websocket: WebSocket, run_id: int) -> None:
         trades_by_bar.setdefault(t["bar_index"], []).append(t)
 
     for snap in snapshots:
+        bar_trades = trades_by_bar.get(snap["bar_index"], [])
         await websocket.send_json({
             "type": "bar",
             "bar_index": snap["bar_index"],
             "timestamp": snap["timestamp"],
             "equity": snap["equity"],
             "cash": snap["cash"],
-            "trades": trades_by_bar.get(snap["bar_index"], []),
+            "trade": bar_trades if bar_trades else None,
         })
 
     run_row = db.get_backtest_run_by_id(run_id)

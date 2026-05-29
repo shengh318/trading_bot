@@ -4,15 +4,17 @@ import Dashboard from "./pages/Dashboard";
 import Backtest from "./pages/Backtest";
 import Strategies from "./pages/Strategies";
 import Live from "./pages/Live";
+import MlLab from "./pages/MlLab";
 import Clock from "./components/Clock";
 
-type Tab = "dashboard" | "backtest" | "strategies" | "live";
+type Tab = "dashboard" | "backtest" | "strategies" | "live" | "ml";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "dashboard", label: "Dashboard" },
   { key: "live", label: "Live" },
   { key: "backtest", label: "Backtest" },
   { key: "strategies", label: "Strategies" },
+  { key: "ml", label: "ML Lab" },
 ];
 
 export default function App() {
@@ -62,6 +64,7 @@ export default function App() {
       {activeTab === "live" && <Live />}
       {activeTab === "backtest" && <Backtest />}
       {activeTab === "strategies" && <Strategies />}
+      {activeTab === "ml" && <MlLab />}
     </div>
   );
 }

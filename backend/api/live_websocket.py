@@ -1,32 +1,13 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-import pandas as pd
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
+from backend.api.websocket import _parse_timeframe
 from backend.engine.live import LiveEngine, set_live_engine, get_live_engine
 from backend.strategies.base import Signal
 
 live_ws_router = APIRouter()
-
-
-def _parse_timeframe(tf_str: str) -> TimeFrame:
-    import re
-    tf_str = tf_str.strip()
-    m = re.match(r"^(\d+)\s*(Min|Hour|Day|Week|Month)$", tf_str, re.IGNORECASE)
-    if not m:
-        return TimeFrame.Day
-    amount = int(m.group(1))
-    unit = m.group(2).lower()
-    unit_map = {
-        "min": TimeFrameUnit.Minute,
-        "hour": TimeFrameUnit.Hour,
-        "day": TimeFrameUnit.Day,
-        "week": TimeFrameUnit.Week,
-        "month": TimeFrameUnit.Month,
-    }
-    return TimeFrame(amount, unit_map[unit])
 
 
 @live_ws_router.websocket("/ws/live")
@@ -99,6 +80,7 @@ async def live_websocket(websocket: WebSocket):
             parameters=data.get("parameters"),
             symbols=symbols,
             timeframe_str=timeframe,
+            initial_cash=data.get("initial_cash"),
         )
         set_live_engine(engine)
         await engine.start({

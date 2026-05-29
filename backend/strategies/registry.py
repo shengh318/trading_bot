@@ -61,10 +61,18 @@ def get_strategy(name: str, params: Optional[dict[str, Any]] = None) -> Strategy
     if params:
         for pdef in info["params"]:
             raw = params.get(pdef["name"], pdef["default"])
-            if pdef["type"] == "int":
-                resolved_params[pdef["name"]] = int(raw)
+            if raw is None:
+                resolved_params[pdef["name"]] = pdef["default"]
+            elif pdef["type"] == "int":
+                try:
+                    resolved_params[pdef["name"]] = int(raw)
+                except (TypeError, ValueError):
+                    resolved_params[pdef["name"]] = pdef["default"]
             elif pdef["type"] == "float":
-                resolved_params[pdef["name"]] = float(raw)
+                try:
+                    resolved_params[pdef["name"]] = float(raw)
+                except (TypeError, ValueError):
+                    resolved_params[pdef["name"]] = pdef["default"]
             elif pdef["type"] == "bool":
                 if isinstance(raw, bool):
                     resolved_params[pdef["name"]] = raw

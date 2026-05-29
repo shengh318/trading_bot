@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import GetOrdersRequest
+from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest
 
 from backend.config import ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_PAPER
 
@@ -70,13 +70,14 @@ def alpaca_orders(limit: int = 25):
 @alpaca_router.get("/api/alpaca/portfolio-history")
 def alpaca_portfolio_history(period: str = "1M", timeframe: str = "1D"):
     client = _get_client()
-    result = client.get("/account/portfolio/history", {
-        "period": period,
-        "timeframe": timeframe,
-        "intraday_reporting": "market_hours",
-    })
-    timestamps = result.get("timestamp", [])
-    equities = result.get("equity", [])
+    req = GetPortfolioHistoryRequest(
+        period=period,
+        timeframe=timeframe,
+        intraday_reporting="market_hours",
+    )
+    history = client.get_portfolio_history(req)
+    timestamps = history.timestamp if hasattr(history, "timestamp") else []
+    equities = history.equity if hasattr(history, "equity") else []
     return [
         {
             "timestamp": ts,

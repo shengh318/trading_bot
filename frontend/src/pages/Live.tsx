@@ -25,10 +25,12 @@ export default function Live() {
   const [log, setLog] = useState<string[]>([]);
   const wsRef = useRef<ReturnType<typeof api.createLiveSocket> | null>(null);
 
-  const markers = trades.map((t) => ({
-    time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
-    side: t.side as "buy" | "sell",
-  }));
+  const markers = trades
+    .filter((t): t is Trade & { side: "buy" | "sell" } => t.side === "buy" || t.side === "sell")
+    .map((t) => ({
+      time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+      side: t.side,
+    }));
 
   const toggleSymbol = (sym: string) => {
     setSelectedSymbols((prev) =>
@@ -67,6 +69,8 @@ export default function Live() {
 
   const addLog = (msg: string) => setLog((prev) => [...prev, msg]);
 
+  const equityRef = useRef<{ time: import("lightweight-charts").Time; value: number }[]>([]);
+
   const startLive = useCallback(async () => {
     setRunning(true);
     setStatusMessage("Connecting...");
@@ -74,6 +78,11 @@ export default function Live() {
     setTrades([]);
     setLog([]);
     setCash(0);
+    equityRef.current = [];
+
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
 
     const ws = api.createLiveSocket();
     wsRef.current = ws;
@@ -81,13 +90,12 @@ export default function Live() {
     try {
       await ws.connect({
         onBar: (event) => {
-          setEquityPoints((prev) => [
-            ...prev,
-            {
-              time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
-              value: event.equity,
-            },
-          ]);
+          const point = {
+            time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+            value: event.equity,
+          };
+          equityRef.current = [...equityRef.current, point];
+          setEquityPoints(equityRef.current);
           setCash(event.cash);
           for (const trade of event.trades) {
             setTrades((prev) => [...prev, trade]);
@@ -105,8 +113,11 @@ export default function Live() {
         },
         onError: (message) => {
           addLog(`Error: ${message}`);
+          setRunning(false);
         },
       });
+
+      ws.onClose(() => setRunning(false));
 
       ws.send({
         action: "start",
@@ -123,6 +134,7 @@ export default function Live() {
 
   const stopLive = useCallback(async () => {
     const ws = wsRef.current;
+    wsRef.current = null;
     if (ws) {
       ws.send({ action: "stop" });
       ws.close();

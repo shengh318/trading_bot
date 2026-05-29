@@ -59,6 +59,7 @@ class BacktestEngine:
         return round(amount, 2)
 
     def run(self) -> BacktestResult:
+        self.portfolio = Portfolio(self.initial_cash)
         trades: list[dict] = []
         snapshots: list[dict] = []
 
@@ -88,6 +89,7 @@ class BacktestEngine:
 
                     self.portfolio.cash -= cost
                     self.portfolio.positions[self.symbol] = total_shares
+                    self.strategy.on_trade("buy", self.symbol, qty, price)
 
                     trades.append({
                         "bar_index": i,
@@ -110,30 +112,29 @@ class BacktestEngine:
                     sell_pct = getattr(strat, "sell_portion", None)
                     if sell_pct is not None:
                         qty = current_pos * sell_pct / 100
-                        if qty <= 0:
-                            continue
+
+                if qty > 0:
+                    proceeds = qty * price
+                    pnl = round(proceeds - (avg_entry * qty), 2)
+                    self.portfolio.cash += proceeds
+                    new_pos = current_pos - qty
+                    self.portfolio.positions[self.symbol] = new_pos
+
+                    if new_pos > 0:
+                        pass
                     else:
-                        qty = current_pos
+                        self.portfolio.positions[self.symbol] = 0
+                        self.portfolio.avg_entry[self.symbol] = 0.0
 
-                proceeds = qty * price
-                pnl = round(proceeds - (avg_entry * qty), 2)
-                self.portfolio.cash += proceeds
-                new_pos = current_pos - qty
-                self.portfolio.positions[self.symbol] = new_pos
-
-                if new_pos <= 0:
-                    self.portfolio.positions[self.symbol] = 0
-                    self.portfolio.avg_entry[self.symbol] = 0.0
-
-                trades.append({
-                    "bar_index": i,
-                    "timestamp": timestamp,
-                    "symbol": self.symbol,
-                    "side": "sell",
-                    "qty": qty,
-                    "price": price,
-                    "pnl": pnl,
-                })
+                    trades.append({
+                        "bar_index": i,
+                        "timestamp": timestamp,
+                        "symbol": self.symbol,
+                        "side": "sell",
+                        "qty": qty,
+                        "price": price,
+                        "pnl": pnl,
+                    })
 
             equity = self.portfolio.cash + sum(
                 pos * float(self.data.iloc[i]["close"])
@@ -161,6 +162,7 @@ class BacktestEngine:
         )
 
     def stream(self) -> Generator[dict, None, None]:
+        self.portfolio = Portfolio(self.initial_cash)
         self.strategy.init(self.data)
 
         for i in range(len(self.data)):
@@ -195,6 +197,7 @@ class BacktestEngine:
 
                     self.portfolio.cash -= cost
                     self.portfolio.positions[self.symbol] = total_shares
+                    self.strategy.on_trade("buy", self.symbol, qty, price)
 
                     event_trade = {
                         "bar_index": i,
@@ -217,30 +220,29 @@ class BacktestEngine:
                     sell_pct = getattr(strat, "sell_portion", None)
                     if sell_pct is not None:
                         qty = current_pos * sell_pct / 100
-                        if qty <= 0:
-                            continue
+
+                if qty > 0:
+                    proceeds = qty * price
+                    pnl = round(proceeds - (avg_entry * qty), 2)
+                    self.portfolio.cash += proceeds
+                    new_pos = current_pos - qty
+                    self.portfolio.positions[self.symbol] = new_pos
+
+                    if new_pos > 0:
+                        pass
                     else:
-                        qty = current_pos
+                        self.portfolio.positions[self.symbol] = 0
+                        self.portfolio.avg_entry[self.symbol] = 0.0
 
-                proceeds = qty * price
-                pnl = round(proceeds - (avg_entry * qty), 2)
-                self.portfolio.cash += proceeds
-                new_pos = current_pos - qty
-                self.portfolio.positions[self.symbol] = new_pos
-
-                if new_pos <= 0:
-                    self.portfolio.positions[self.symbol] = 0
-                    self.portfolio.avg_entry[self.symbol] = 0.0
-
-                event_trade = {
-                    "bar_index": i,
-                    "timestamp": timestamp,
-                    "symbol": self.symbol,
-                    "side": "sell",
-                    "qty": qty,
-                    "price": price,
-                    "pnl": pnl,
-                }
+                    event_trade = {
+                        "bar_index": i,
+                        "timestamp": timestamp,
+                        "symbol": self.symbol,
+                        "side": "sell",
+                        "qty": qty,
+                        "price": price,
+                        "pnl": pnl,
+                    }
 
             equity = self.portfolio.cash + sum(
                 pos * float(self.data.iloc[i]["close"])
@@ -308,6 +310,7 @@ class MultiSymbolBacktestEngine:
         return round(amount, 2)
 
     def run(self) -> BacktestResult:
+        self.portfolio = Portfolio(self.initial_cash)
         trades: list[dict] = []
         snapshots: list[dict] = []
         timestamps = self._get_union_timestamps()
@@ -340,6 +343,7 @@ class MultiSymbolBacktestEngine:
                         self.portfolio.avg_entry[sym] = total_cost / total_shares
                         self.portfolio.cash -= cost
                         self.portfolio.positions[sym] = total_shares
+                        self.strategies[sym].on_trade("buy", sym, qty, price)
 
                         trades.append({
                             "bar_index": i,
@@ -362,30 +366,29 @@ class MultiSymbolBacktestEngine:
                         sell_pct = getattr(strat, "sell_portion", None)
                         if sell_pct is not None:
                             qty = current_pos * sell_pct / 100
-                            if qty <= 0:
-                                continue
+
+                    if qty > 0:
+                        proceeds = qty * price
+                        pnl = round(proceeds - (avg * qty), 2)
+                        self.portfolio.cash += proceeds
+                        new_pos = current_pos - qty
+                        self.portfolio.positions[sym] = new_pos
+
+                        if new_pos > 0:
+                            pass
                         else:
-                            qty = current_pos
+                            self.portfolio.positions[sym] = 0
+                            self.portfolio.avg_entry[sym] = 0.0
 
-                    proceeds = qty * price
-                    pnl = round(proceeds - (avg * qty), 2)
-                    self.portfolio.cash += proceeds
-                    new_pos = current_pos - qty
-                    self.portfolio.positions[sym] = new_pos
-
-                    if new_pos <= 0:
-                        self.portfolio.positions[sym] = 0
-                        self.portfolio.avg_entry[sym] = 0.0
-
-                    trades.append({
-                        "bar_index": i,
-                        "timestamp": str(ts),
-                        "symbol": sym,
-                        "side": "sell",
-                        "qty": qty,
-                        "price": price,
-                        "pnl": pnl,
-                    })
+                        trades.append({
+                            "bar_index": i,
+                            "timestamp": str(ts),
+                            "symbol": sym,
+                            "side": "sell",
+                            "qty": qty,
+                            "price": price,
+                            "pnl": pnl,
+                        })
 
             equity = self.portfolio.cash + sum(
                 self.portfolio.positions.get(sym, 0) * float(self.data[sym].loc[ts, "close"])
@@ -414,12 +417,15 @@ class MultiSymbolBacktestEngine:
         )
 
     def stream(self) -> Generator[dict, None, None]:
+        self.portfolio = Portfolio(self.initial_cash)
         timestamps = self._get_union_timestamps()
         local_idx: dict[str, int] = {sym: -1 for sym in self.symbols}
 
         for global_i, ts in enumerate(timestamps):
             ts = pd.Timestamp(ts)
             bar_trades: list[dict] = []
+            bar_signals: list[str] = []
+            bar_dividends: list[dict] = []
 
             for sym in self.symbols:
                 if ts not in self.data[sym].index:
@@ -428,8 +434,17 @@ class MultiSymbolBacktestEngine:
                 i = local_idx[sym]
                 price = float(self.data[sym].loc[ts, "close"])
 
-                self._apply_dividend(sym, ts)
+                div_amount = self._apply_dividend(sym, ts)
+                if div_amount > 0:
+                    bar_dividends.append({
+                        "bar_index": global_i,
+                        "timestamp": str(ts),
+                        "symbol": sym,
+                        "dividend": div_amount,
+                    })
+
                 signal = self.strategies[sym].next(i, self.data[sym], self.portfolio)
+                bar_signals.append(signal)
 
                 if signal == Signal.BUY and self.portfolio.cash > 0:
                     strat = self.strategies[sym]
@@ -445,9 +460,10 @@ class MultiSymbolBacktestEngine:
                         self.portfolio.avg_entry[sym] = total_cost / total_shares
                         self.portfolio.cash -= cost
                         self.portfolio.positions[sym] = total_shares
+                        self.strategies[sym].on_trade("buy", sym, qty, price)
 
                         bar_trades.append({
-                            "bar_index": i,
+                            "bar_index": global_i,
                             "timestamp": str(ts),
                             "symbol": sym,
                             "side": "buy",
@@ -467,30 +483,29 @@ class MultiSymbolBacktestEngine:
                         sell_pct = getattr(strat, "sell_portion", None)
                         if sell_pct is not None:
                             qty = current_pos * sell_pct / 100
-                            if qty <= 0:
-                                continue
+
+                    if qty > 0:
+                        proceeds = qty * price
+                        pnl = round(proceeds - (avg * qty), 2)
+                        self.portfolio.cash += proceeds
+                        new_pos = current_pos - qty
+                        self.portfolio.positions[sym] = new_pos
+
+                        if new_pos > 0:
+                            pass
                         else:
-                            qty = current_pos
+                            self.portfolio.positions[sym] = 0
+                            self.portfolio.avg_entry[sym] = 0.0
 
-                    proceeds = qty * price
-                    pnl = round(proceeds - (avg * qty), 2)
-                    self.portfolio.cash += proceeds
-                    new_pos = current_pos - qty
-                    self.portfolio.positions[sym] = new_pos
-
-                    if new_pos <= 0:
-                        self.portfolio.positions[sym] = 0
-                        self.portfolio.avg_entry[sym] = 0.0
-
-                    bar_trades.append({
-                        "bar_index": i,
-                        "timestamp": str(ts),
-                        "symbol": sym,
-                        "side": "sell",
-                        "qty": qty,
-                        "price": price,
-                        "pnl": pnl,
-                    })
+                        bar_trades.append({
+                            "bar_index": global_i,
+                            "timestamp": str(ts),
+                            "symbol": sym,
+                            "side": "sell",
+                            "qty": qty,
+                            "price": price,
+                            "pnl": pnl,
+                        })
 
             equity = self.portfolio.cash + sum(
                 self.portfolio.positions.get(sym, 0) * float(self.data[sym].loc[ts, "close"])
@@ -505,4 +520,4 @@ class MultiSymbolBacktestEngine:
                 "cash": round(self.portfolio.cash, 2),
             }
 
-            yield {"snapshot": snapshot, "trades": bar_trades}
+            yield {"snapshot": snapshot, "trade": bar_trades, "signal": bar_signals, "dividend": bar_dividends}

@@ -123,66 +123,64 @@ export type WsEvent = WsBarEvent | WsCompleteEvent | WsErrorEvent;
 export class ApiClient {
   private base = "";
 
-  async getStrategies(): Promise<StrategyInfo[]> {
-    const res = await fetch(`${this.base}/api/strategies`);
+  private async _fetch<T>(url: string, options?: RequestInit): Promise<T> {
+    const res = options !== undefined ? await fetch(url, options) : await fetch(url);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
     return res.json();
+  }
+
+  async getStrategies(): Promise<StrategyInfo[]> {
+    return this._fetch(`${this.base}/api/strategies`);
   }
 
   async getAccountSummary(): Promise<AccountSummary> {
-    const res = await fetch(`${this.base}/api/portfolio/summary`);
-    return res.json();
+    return this._fetch(`${this.base}/api/portfolio/summary`);
   }
 
   async getEquityCurve(limit = 500): Promise<EquityPoint[]> {
-    const res = await fetch(`${this.base}/api/portfolio/equity-curve?limit=${limit}`);
-    return res.json();
+    return this._fetch(`${this.base}/api/portfolio/equity-curve?limit=${limit}`);
   }
 
   async getPositions(): Promise<Position[]> {
-    const res = await fetch(`${this.base}/api/positions`);
-    return res.json();
+    return this._fetch(`${this.base}/api/positions`);
   }
 
   async getOrders(limit = 100): Promise<Order[]> {
-    const res = await fetch(`${this.base}/api/orders?limit=${limit}`);
-    return res.json();
+    return this._fetch(`${this.base}/api/orders?limit=${limit}`);
   }
 
   async getBacktestRuns(limit = 20): Promise<BacktestRun[]> {
-    const res = await fetch(`${this.base}/api/backtest/runs?limit=${limit}`);
-    return res.json();
+    return this._fetch(`${this.base}/api/backtest/runs?limit=${limit}`);
   }
 
   async getBacktestRun(id: number): Promise<BacktestRun> {
-    const res = await fetch(`${this.base}/api/backtest/runs/${id}`);
-    return res.json();
+    return this._fetch(`${this.base}/api/backtest/runs/${id}`);
   }
 
   async getBacktestTrades(id: number): Promise<Trade[]> {
-    const res = await fetch(`${this.base}/api/backtest/runs/${id}/trades`);
-    return res.json();
+    return this._fetch(`${this.base}/api/backtest/runs/${id}/trades`);
   }
 
   async getBacktestEquity(id: number): Promise<Snapshot[]> {
-    const res = await fetch(`${this.base}/api/backtest/runs/${id}/equity`);
-    return res.json();
+    return this._fetch(`${this.base}/api/backtest/runs/${id}/equity`);
   }
 
   async runBacktest(req: BacktestRunRequest): Promise<BacktestRun> {
-    const res = await fetch(`${this.base}/api/backtest/run`, {
+    return this._fetch(`${this.base}/api/backtest/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
     });
-    return res.json();
   }
 
   async clearBacktestRuns(): Promise<void> {
-    await fetch(`${this.base}/api/backtest/runs`, { method: "DELETE" });
+    await this._fetch(`${this.base}/api/backtest/runs`, { method: "DELETE" });
   }
 
   async deleteBacktestRun(id: number): Promise<void> {
-    await fetch(`${this.base}/api/backtest/runs/${id}`, { method: "DELETE" });
+    await this._fetch(`${this.base}/api/backtest/runs/${id}`, { method: "DELETE" });
   }
 
   createBacktestSocket(): BacktestSocket {
@@ -229,6 +227,33 @@ export class ApiClient {
     if (!res.ok) throw new Error("Alpaca portfolio history not available");
     return res.json();
   }
+
+  async getMlModels(): Promise<MlModelInfo[]> {
+    return this._fetch(`${this.base}/api/ml/models`);
+  }
+
+  async getMlModel(name: string): Promise<MlModelInfo> {
+    return this._fetch(`${this.base}/api/ml/models/${encodeURIComponent(name)}`);
+  }
+
+  async retrainMlModel(req: MlRetrainRequest): Promise<MlRetrainResponse> {
+    return this._fetch(`${this.base}/api/ml/retrain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+  }
+
+  async getMlRetrainStatus(name: string): Promise<MlRetrainResponse> {
+    return this._fetch(`${this.base}/api/ml/retrain/status/${encodeURIComponent(name)}`);
+  }
+
+  async deleteMlModel(name: string, version?: number): Promise<void> {
+    const params = version !== undefined ? `?version=${version}` : "";
+    await this._fetch(`${this.base}/api/ml/models/${encodeURIComponent(name)}${params}`, {
+      method: "DELETE",
+    });
+  }
 }
 
 export type WsCallback = {
@@ -240,6 +265,7 @@ export type WsCallback = {
 export class BacktestSocket {
   private ws: WebSocket | null = null;
   private callbacks: WsCallback = {};
+  private closeCallback: (() => void) | null = null;
 
   constructor(private url: string) {}
 
@@ -247,7 +273,12 @@ export class BacktestSocket {
     this.callbacks = callbacks;
     this.ws = new WebSocket(this.url);
     this.ws.onmessage = (msg) => {
-      const event: WsEvent = JSON.parse(msg.data);
+      let event: WsEvent;
+      try {
+        event = JSON.parse(msg.data);
+      } catch {
+        return;
+      }
       switch (event.type) {
         case "bar":
           this.callbacks.onBar?.(event);
@@ -263,7 +294,12 @@ export class BacktestSocket {
     return new Promise<void>((resolve, reject) => {
       this.ws!.onopen = () => resolve();
       this.ws!.onerror = () => reject(new Error("WebSocket connection failed"));
+      this.ws!.onclose = () => this.closeCallback?.();
     });
+  }
+
+  onClose(cb: () => void) {
+    this.closeCallback = cb;
   }
 
   send(data: Record<string, unknown>) {
@@ -317,6 +353,7 @@ export type WsLiveCallback = {
 export class LiveSocket {
   private ws: WebSocket | null = null;
   private callbacks: WsLiveCallback = {};
+  private closeCallback: (() => void) | null = null;
 
   constructor(private url: string) {}
 
@@ -324,7 +361,12 @@ export class LiveSocket {
     this.callbacks = callbacks;
     this.ws = new WebSocket(this.url);
     this.ws.onmessage = (msg) => {
-      const event: WsLiveEvent = JSON.parse(msg.data);
+      let event: WsLiveEvent;
+      try {
+        event = JSON.parse(msg.data);
+      } catch {
+        return;
+      }
       switch (event.type) {
         case "bar":
           this.callbacks.onBar?.(event);
@@ -340,7 +382,12 @@ export class LiveSocket {
     return new Promise<void>((resolve, reject) => {
       this.ws!.onopen = () => resolve();
       this.ws!.onerror = () => reject(new Error("WebSocket connection failed"));
+      this.ws!.onclose = () => this.closeCallback?.();
     });
+  }
+
+  onClose(cb: () => void) {
+    this.closeCallback = cb;
   }
 
   send(data: Record<string, unknown>) {
@@ -351,6 +398,45 @@ export class LiveSocket {
     this.ws?.close();
     this.ws = null;
   }
+}
+
+export interface MlModelInfo {
+  name: string;
+  version: number;
+  model_type: string;
+  train_date: string;
+  train_symbols: string[];
+  context_symbols: string[];
+  validation_metrics: Record<string, number>;
+  beat_baselines: boolean;
+  versions: number[];
+}
+
+export interface MlRetrainRequest {
+  symbols: string;
+  years: number;
+  name: string;
+  model_types: string;
+  beat_baselines: boolean;
+  grid_search: boolean;
+  walk_forward: number;
+  stacking: boolean;
+  meta_labeling: boolean;
+  regularize: boolean;
+  prune: number;
+  kelly: boolean;
+  auto_threshold: boolean;
+  labeling: string;
+  forecast_horizon: number;
+  context_symbols?: string;
+  multi_horizon?: string;
+  regime_aware: boolean;
+}
+
+export interface MlRetrainResponse {
+  status: string;
+  pid?: number;
+  message: string;
 }
 
 export const api = new ApiClient();
