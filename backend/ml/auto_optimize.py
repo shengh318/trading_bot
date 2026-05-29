@@ -88,11 +88,11 @@ def run_train(
 
     # ── Training banner ──────────────────────────────────────────────
     print()
-    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}Step {step_index}/{total_steps}  :  {Style.BRIGHT}{step_label}{Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}{'─' * 70}{Style.RESET_ALL}")
-    print(f"  Command    :  python -m backend.ml.train --name {name} {cli_str}")
-    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.MAGENTA}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.MAGENTA}Step {step_index}/{total_steps}  :  {Style.BRIGHT}{step_label}{Style.RESET_ALL}")
+    print(f"  {Fore.MAGENTA}{'─' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}Command{Style.RESET_ALL}    :  python -m backend.ml.train --name {name} {cli_str}")
+    print(f"  {Fore.MAGENTA}{'━' * 70}{Style.RESET_ALL}")
     print()
 
     # ── Stream subprocess output in real-time ────────────────────────
@@ -107,7 +107,7 @@ def run_train(
     )
     if process.stdout is not None:
         for line in process.stdout:
-            print(line, end="", flush=True)
+            print(colorize_output(line), end="", flush=True)
             output_lines.append(line)
     try:
         process.wait(timeout=timeout)
@@ -138,27 +138,124 @@ def print_leaderboard(log: list[tuple[str, float | None, bool]]) -> None:
     if not log:
         return
 
-    print(f"\n  {Fore.CYAN}{'═' * 40}{Style.RESET_ALL}")
-    print(f"  {Style.BRIGHT}LEADERBOARD{Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}{'═' * 40}{Style.RESET_ALL}")
+    print(f"\n  {Fore.GREEN}{'═' * 42}{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{Style.BRIGHT} LEADERBOARD{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{'═' * 42}{Style.RESET_ALL}")
     print(f"  {'':>4}  {'Enhancement':<38} {'Sharpe':>8}  {'Verdict':<8}")
-    print(f"  {Fore.CYAN}{'─' * 64}{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{'─' * 64}{Style.RESET_ALL}")
 
     # Sort by Sharpe descending (None values at bottom)
     ranked = sorted(log, key=lambda x: (x[1] is None, -(x[1] or 0)))
 
     for rank, (sname, sharpe, kept) in enumerate(ranked, 1):
         sharpe_str = f"{sharpe:.4f}" if sharpe is not None else "  N/A  "
-        color = Fore.GREEN if kept else Fore.RED
-        verdict = f"{color}KEPT{Style.RESET_ALL}" if kept else f"{Fore.RED}SKIP{Style.RESET_ALL}"
+        verdict = f"{Fore.GREEN}KEPT{Style.RESET_ALL}" if kept else f"{Fore.RED}SKIP{Style.RESET_ALL}"
+        rank_color = Fore.YELLOW if rank == 1 and sharpe is not None else Fore.WHITE
+        prefix = f"{Fore.YELLOW}>{Style.RESET_ALL}" if rank == 1 and sharpe is not None else " "
+        sharpe_color = Fore.GREEN if sharpe and sharpe > 0 else Fore.RED if sharpe and sharpe < 0 else Fore.WHITE
 
-        if rank == 1 and sharpe is not None:
-            prefix = f"{Fore.YELLOW}>>{Style.RESET_ALL}"
-        else:
-            prefix = f"  "
+        print(f"  {prefix} {rank_color}{rank:>2}{Style.RESET_ALL}.  {sname:<38}  {sharpe_color}{sharpe_str:>8}{Style.RESET_ALL}  {verdict}")
+    print(f"  {Fore.GREEN}{'─' * 64}{Style.RESET_ALL}")
 
-        print(f"  {prefix} {rank:>2}.  {sname:<38} {Fore.WHITE}{sharpe_str:>8}{Style.RESET_ALL}  {verdict}")
-    print(f"  {Fore.CYAN}{'─' * 64}{Style.RESET_ALL}")
+
+def colorize_output(line: str) -> str:
+    """Apply ANSI color to common train.py output patterns for readability."""
+    s = line.rstrip("\n\r")
+    if not s.strip():
+        return line
+
+    stripped = s.strip()
+
+    # Errors — bright red
+    if stripped.startswith("ERROR:"):
+        return f"{Fore.RED}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Step headers (Step X/5: ...)
+    if re.match(r"Step \d/5:", stripped):
+        return f"{Fore.CYAN}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Download progress
+    if stripped.startswith("Downloading"):
+        return f"{Fore.YELLOW}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Model training
+    if re.match(r"Training \w+", stripped):
+        return f"{Fore.MAGENTA}{s}{Style.RESET_ALL}\n"
+
+    # Backtesting
+    if stripped.startswith("Backtesting"):
+        return f"{Fore.BLUE}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Walk-forward fold headers
+    if re.match(r"--- Fold \d+/\d+ ---", stripped):
+        return f"{Fore.YELLOW}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Grid search iteration
+    if re.match(r"\[\d+/\d+\]", stripped) or stripped.startswith("Grid search"):
+        return f"{Fore.MAGENTA}{s}{Style.RESET_ALL}\n"
+
+    # Building ensemble / meta-labeler
+    if (stripped.startswith("Building StackingEnsemble")
+        or stripped.startswith("Building meta-labeler")):
+        return f"{Fore.MAGENTA}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # OK / TROPHY messages
+    if stripped.startswith(("[OK]", "[TROPHY]")):
+        return f"{Fore.GREEN}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Failure messages
+    if stripped.startswith("[X]"):
+        return f"{Fore.RED}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Auto-tune messages
+    if stripped.startswith("[>>]"):
+        return f"{Fore.YELLOW}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # STRATEGY COMPARISON header
+    if "STRATEGY COMPARISON" in s:
+        return f"{Fore.WHITE}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Comparison table strategy rows (label + return% + sharpe)
+    m = re.match(r"(\s*\S.*?)([+-]\d+\.\d+%)(\s+\d+\.\d+)", s)
+    if m:
+        pct = m.group(2)
+        pct_color = Fore.GREEN if pct.startswith("+") else Fore.RED
+        return f"{m.group(1)}{pct_color}{Style.BRIGHT}{pct}{Style.RESET_ALL}{m.group(3)}\n"
+
+    # Walk-Forward AVERAGE Results
+    if "Walk-Forward AVERAGE Results" in s:
+        return f"{Fore.WHITE}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Grid search winner
+    if "Grid search winner" in stripped:
+        return f"{Fore.GREEN}{Style.BRIGHT}{s}{Style.RESET_ALL}\n"
+
+    # Pruning
+    if stripped.startswith("Pruning"):
+        return f"{Fore.YELLOW}{s}{Style.RESET_ALL}\n"
+
+    # Retraining on full dataset
+    if stripped.startswith("Retraining on full dataset"):
+        return f"{Fore.YELLOW}{s}{Style.RESET_ALL}\n"
+
+    # Total samples / feature columns
+    if (stripped.startswith("Total samples:")
+        or stripped.startswith("Feature columns:")):
+        return f"{Fore.CYAN}{s}{Style.RESET_ALL}\n"
+
+    # Return percentage in result lines
+    if re.search(r"Return=[+-]?\d+\.?\d*%", stripped):
+        return f"{Fore.GREEN}{s}{Style.RESET_ALL}\n"
+
+    # Training accuracy / validation metrics
+    if re.match(r"Train acc:", stripped) or re.match(r"Val:", stripped):
+        return f"{Fore.CYAN}{s}{Style.RESET_ALL}\n"
+
+    # Feature importance lines
+    if re.match(r"\d+\.\s+\w+.*:", stripped):
+        return f"{Fore.YELLOW}{s}{Style.RESET_ALL}\n"
+
+    return line
 
 
 def flags_to_cli(flags: dict[str, str | None]) -> list[str]:
@@ -285,11 +382,11 @@ def main() -> None:
     total_steps = len(steps)
     symbol_list = args.symbols.split(",")
     print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
-    print(f"  {Style.BRIGHT}ML AUTO-OPTIMIZER  —  Forward Selection{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}ML  AUTO-OPTIMIZER  —  Forward Selection{Style.RESET_ALL}")
     print(f"  {Fore.CYAN}{'─' * 70}{Style.RESET_ALL}")
-    print(f"  Symbols    :  {'  '.join(s.upper() for s in symbol_list)}  ({len(symbol_list)} total)")
-    print(f"  History    :  {args.years} years  |  Cutoff: 2023-01-01")
-    print(f"  Steps      :  {total_steps} total")
+    print(f"  {Fore.YELLOW}Symbols{Style.RESET_ALL}    :  {'  '.join(Fore.WHITE + s.upper() + Style.RESET_ALL for s in symbol_list)}  ({len(symbol_list)} total)")
+    print(f"  {Fore.YELLOW}History{Style.RESET_ALL}    :  {args.years} years  |  Cutoff: 2023-01-01")
+    print(f"  {Fore.YELLOW}Steps{Style.RESET_ALL}      :  {total_steps} total")
     print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
 
     active_flags: dict[str, str | None] = {}
@@ -316,7 +413,7 @@ def main() -> None:
             kept = True
             active_flags = candidate
             best_sharpe = sharpe
-            print(f"\n  {Fore.GREEN}■ KEPT{Style.RESET_ALL}  {step_name}  →  Sharpe {Fore.GREEN}{sharpe:.4f}{Style.RESET_ALL}  {Fore.CYAN}(new best!){Style.RESET_ALL}")
+            print(f"\n  {Fore.GREEN}■ KEPT{Style.RESET_ALL}  {step_name}  →  Sharpe {Fore.GREEN}{sharpe:.4f}{Style.RESET_ALL}  {Fore.MAGENTA}(new best!){Style.RESET_ALL}")
         else:
             kept = False
             if sharpe is not None:
@@ -332,9 +429,9 @@ def main() -> None:
 
     # ── Forward-selection summary ────────────────────────────────────
     print()
-    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
-    print(f"  {Style.BRIGHT}FORWARD-SELECTION COMPLETE{Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.YELLOW}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.YELLOW}{Style.BRIGHT}FORWARD-SELECTION COMPLETE{Style.RESET_ALL}")
+    print(f"  {Fore.YELLOW}{'━' * 70}{Style.RESET_ALL}")
 
     if best_sharpe is not None:
         print(f"\n  {Fore.GREEN}Best Sharpe   :  {Style.BRIGHT}{best_sharpe:.4f}{Style.RESET_ALL}")
@@ -343,11 +440,11 @@ def main() -> None:
 
     print(f"\n  {Style.BRIGHT}Optimal flags:{Style.RESET_ALL}")
     if active_flags:
-        print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+        print(f"    {Fore.YELLOW}{'─' * 50}{Style.RESET_ALL}")
         for k, v in active_flags.items():
             val_str = f"  {v}" if v is not None else ""
             print(f"    {Fore.YELLOW}{k}{Style.RESET_ALL}{val_str}")
-        print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+        print(f"    {Fore.YELLOW}{'─' * 50}{Style.RESET_ALL}")
     else:
         print(f"    (none — baseline only)")
 
@@ -358,12 +455,12 @@ def main() -> None:
         return
 
     print()
-    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
-    print(f"  {Style.BRIGHT}CHAMPION TRAINING{Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}{'─' * 70}{Style.RESET_ALL}")
-    print(f"  Building final model with optimal flags + --grid-search")
+    print(f"  {Fore.MAGENTA}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.MAGENTA}{Style.BRIGHT}CHAMPION TRAINING{Style.RESET_ALL}")
+    print(f"  {Fore.MAGENTA}{'─' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}Building final model{Style.RESET_ALL} with optimal flags + --grid-search")
     print(f"  + --walk-forward 5 for rigorous validation...")
-    print(f"  {Fore.CYAN}{'━' * 70}{Style.RESET_ALL}")
+    print(f"  {Fore.MAGENTA}{'━' * 70}{Style.RESET_ALL}")
 
     champion_flags = dict(active_flags)
     champion_flags["--grid-search"] = None
@@ -396,11 +493,11 @@ def main() -> None:
         print(f"  Sharpe     :  {Fore.RED}(unknown){Style.RESET_ALL}")
 
     print(f"\n  {Style.BRIGHT}Flags used:{Style.RESET_ALL}")
-    print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+    print(f"    {Fore.GREEN}{'─' * 50}{Style.RESET_ALL}")
     for k, v in champion_flags.items():
         val_str = f"  {v}" if v is not None else ""
         print(f"    {Fore.YELLOW}{k}{Style.RESET_ALL}{val_str}")
-    print(f"    {Fore.CYAN}{'─' * 50}{Style.RESET_ALL}")
+    print(f"    {Fore.GREEN}{'─' * 50}{Style.RESET_ALL}")
 
     print(f"\n  {Style.BRIGHT}Next steps:{Style.RESET_ALL}")
     print(f"    1. Start API:  {Fore.YELLOW}.venv\\Scripts\\uvicorn backend.api.main:app --reload{Style.RESET_ALL}")
