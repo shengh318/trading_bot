@@ -310,6 +310,9 @@ export class BacktestSocket {
 
   connect(callbacks: WsCallback) {
     this.callbacks = callbacks;
+    if (this.ws) {
+      try { this.ws.close(); } catch { /* ignore */ }
+    }
     this.ws = new WebSocket(this.url);
     this.ws.onmessage = (msg) => {
       let event: WsEvent;
@@ -398,6 +401,9 @@ export class LiveSocket {
 
   connect(callbacks: WsLiveCallback) {
     this.callbacks = callbacks;
+    if (this.ws) {
+      try { this.ws.close(); } catch { /* ignore */ }
+    }
     this.ws = new WebSocket(this.url);
     this.ws.onmessage = (msg) => {
       let event: WsLiveEvent;

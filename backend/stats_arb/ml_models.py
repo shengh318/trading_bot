@@ -373,12 +373,6 @@ class SpreadPredictor:
             acc = float(accuracy_score(y_true, y_pred))
             auc = 0.0
             try:
-                if hasattr(self._model, "predict_proba"):
-                    proba = self._model.predict_proba(
-                        self._scaler.transform(
-                            self._model.feature_importances_ is not None
-                        )
-                    )
                 auc = float(roc_auc_score(y_true, y_pred))
             except Exception:
                 pass

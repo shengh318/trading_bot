@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api, type MlModelInfo, type MlRetrainRequest } from "../api/client";
 import { useTheme } from "../theme/ThemeContext";
 
@@ -102,6 +102,7 @@ export default function MlLab() {
   const [loading, setLoading] = useState(true);
   const [req, setReq] = useState<MlRetrainRequest>({ ...INITIAL_REQ });
   const [trainingStatus, setTrainingStatus] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchModels = useCallback(async () => {
     try {
@@ -116,26 +117,36 @@ export default function MlLab() {
   useEffect(() => {
     fetchModels();
     const interval = setInterval(fetchModels, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
   }, [fetchModels]);
 
   const handleRetrain = async () => {
     setTrainingStatus("Starting training...");
+    const modelName = req.name || `model_${Date.now()}`;
     try {
-      const res = await api.retrainMlModel(req);
+      const res = await api.retrainMlModel({ ...req, name: modelName });
       setTrainingStatus(res.message);
       const poll = setInterval(async () => {
         try {
-          const status = await api.getMlRetrainStatus(req.name || `model_${Date.now()}`);
+          const status = await api.getMlRetrainStatus(modelName);
           setTrainingStatus(status.message);
           if (status.status === "completed" || status.status === "unknown") {
             clearInterval(poll);
+            pollRef.current = null;
             fetchModels();
           }
         } catch {
           clearInterval(poll);
+          pollRef.current = null;
         }
       }, 3000);
+      pollRef.current = poll;
     } catch (e: unknown) {
       setTrainingStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -151,7 +162,12 @@ export default function MlLab() {
   };
 
   const toggleBool = (key: string) => {
-    setReq((prev) => ({ ...prev, [key]: !(prev as unknown as Record<string, boolean>)[key] }));
+    setReq((prev) => {
+      if (key === "walk_forward") {
+        return { ...prev, walk_forward: (prev.walk_forward ? 0 : 1) as never };
+      }
+      return { ...prev, [key]: !(prev as unknown as Record<string, boolean>)[key] };
+    });
   };
 
   const sel: React.CSSProperties = {

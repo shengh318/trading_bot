@@ -19,7 +19,7 @@ def calculate_metrics(
             "profit_factor": 0.0,
         }
     final_equity = equity_curve["equity"].iloc[-1]
-    total_return_pct = ((final_equity - initial_cash) / initial_cash) * 100
+    total_return_pct = ((final_equity - initial_cash) / initial_cash) * 100 if initial_cash > 0 else 0.0
 
     num_trades = len(trades) if not trades.empty else 0
 

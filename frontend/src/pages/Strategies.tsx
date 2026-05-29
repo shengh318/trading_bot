@@ -7,7 +7,7 @@ export default function Strategies() {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
 
   useEffect(() => {
-    api.getStrategies().then(setStrategies);
+    api.getStrategies().then(setStrategies).catch(() => {});
   }, []);
 
   return (

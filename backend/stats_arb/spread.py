@@ -120,15 +120,19 @@ class SpreadAnalyzer:
         spread = self.spread
         mean = float(spread.mean())
         std = float(spread.std())
-        zscore_series = (spread - mean) / std
+        zscore_series = (spread - mean) / std if std > 0 else pd.Series(0.0, index=spread.index)
         current_zscore = float(zscore_series.iloc[-1])
 
         half_life = self._estimate_half_life(spread.values)
         hurst_exp = self._hurst_exponent(spread.values)
 
-        adf_full = adfuller(spread.values, maxlag=1, autolag="AIC")
-        adf_stat, adf_p = float(adf_full[0]), float(adf_full[1])
-        is_stationary = bool(adf_p < 0.05)
+        if spread.nunique() <= 1:
+            adf_stat, adf_p = 0.0, 1.0
+            is_stationary = False
+        else:
+            adf_full = adfuller(spread.values, maxlag=1, autolag="AIC")
+            adf_stat, adf_p = float(adf_full[0]), float(adf_full[1])
+            is_stationary = bool(adf_p < 0.05)
 
         speed = self._ou_mean_reversion_speed(spread.values)
         expected_time = self._expected_time_to_mean(current_zscore, speed) if speed < 0 else float("inf")
@@ -200,6 +204,8 @@ class SpreadAnalyzer:
         H > 0.5 → trending (persistent).
         """
         if len(ts) < 20:
+            return 0.5
+        if np.nanmin(ts) == np.nanmax(ts):
             return 0.5
 
         ts = np.asarray(ts)

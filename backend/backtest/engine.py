@@ -74,7 +74,7 @@ class BacktestEngine:
 
             signal = self.strategy.next(i, self.data, self.portfolio)
 
-            if signal == Signal.BUY and self.portfolio.cash > 0:
+            if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
                 strat = self.strategy
                 trade_amt = getattr(strat, "buy_size", None)
                 buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
@@ -112,6 +112,8 @@ class BacktestEngine:
                     sell_pct = getattr(strat, "sell_portion", None)
                     if sell_pct is not None:
                         qty = current_pos * sell_pct / 100
+                    else:
+                        qty = current_pos
 
                 if qty > 0:
                     proceeds = qty * price
@@ -182,7 +184,7 @@ class BacktestEngine:
             signal = self.strategy.next(i, self.data, self.portfolio)
             event_trade = None
 
-            if signal == Signal.BUY and self.portfolio.cash > 0:
+            if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
                 strat = self.strategy
                 trade_amt = getattr(strat, "buy_size", None)
                 buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
@@ -220,6 +222,8 @@ class BacktestEngine:
                     sell_pct = getattr(strat, "sell_portion", None)
                     if sell_pct is not None:
                         qty = current_pos * sell_pct / 100
+                    else:
+                        qty = current_pos
 
                 if qty > 0:
                     proceeds = qty * price
@@ -329,7 +333,7 @@ class MultiSymbolBacktestEngine:
                 self._apply_dividend(sym, ts)
                 signal = self.strategies[sym].next(i, self.data[sym], self.portfolio)
 
-                if signal == Signal.BUY and self.portfolio.cash > 0:
+                if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
                     strat = self.strategies[sym]
                     trade_amt = getattr(strat, "buy_size", None)
                     buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
@@ -366,6 +370,8 @@ class MultiSymbolBacktestEngine:
                         sell_pct = getattr(strat, "sell_portion", None)
                         if sell_pct is not None:
                             qty = current_pos * sell_pct / 100
+                        else:
+                            qty = current_pos
 
                     if qty > 0:
                         proceeds = qty * price
@@ -446,7 +452,7 @@ class MultiSymbolBacktestEngine:
                 signal = self.strategies[sym].next(i, self.data[sym], self.portfolio)
                 bar_signals.append(signal)
 
-                if signal == Signal.BUY and self.portfolio.cash > 0:
+                if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
                     strat = self.strategies[sym]
                     trade_amt = getattr(strat, "buy_size", None)
                     buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
@@ -483,6 +489,8 @@ class MultiSymbolBacktestEngine:
                         sell_pct = getattr(strat, "sell_portion", None)
                         if sell_pct is not None:
                             qty = current_pos * sell_pct / 100
+                        else:
+                            qty = current_pos
 
                     if qty > 0:
                         proceeds = qty * price
