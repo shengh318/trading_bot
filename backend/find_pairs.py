@@ -68,13 +68,17 @@ def _get_highly_correlated_pairs(
     corr_matrix: pd.DataFrame,
     min_correlation: float = 0.5,
 ) -> list[tuple[str, str, float]]:
-    """Return pairs with correlation >= min_correlation."""
+    """Return pairs with correlation >= min_correlation and < 0.99.
+    
+    Pairs with correlation >= 0.99 are near-identical (e.g. SPY/VOO) and
+    cause collinearity warnings + LAPACK errors in cointegration tests.
+    """
     pairs: list[tuple[str, str, float]] = []
     for i in range(len(tickers)):
         for j in range(i + 1, len(tickers)):
             a, b = tickers[i], tickers[j]
             corr = corr_matrix.loc[a, b]
-            if corr >= min_correlation:
+            if min_correlation <= corr < 0.99 and np.isfinite(corr):
                 pairs.append((a, b, corr))
     pairs.sort(key=lambda x: x[2], reverse=True)
     return pairs
@@ -82,13 +86,33 @@ def _get_highly_correlated_pairs(
 
 def _test_coint(args: tuple) -> tuple[str, str, float, float]:
     """Quick EG cointegration test on a single pair using cached parquet data."""
+    import os
+    import warnings
     a, b, data_path, significance = args
     try:
         prices = pd.read_parquet(data_path, columns=[a, b])
         if len(prices) < 50:
             return (a, b, 1.0, 0.0)
-        ct = CointegrationTester(prices, significance)
-        res = ct.run()
+        # Skip near-identical pairs (collinearity breaks cointegration test)
+        corr_val = prices[a].corr(prices[b])
+        if corr_val >= 0.99 or not np.isfinite(corr_val):
+            return (a, b, 1.0, 0.0)
+        # Suppress LAPACK/BLAS stderr noise from statsmodels
+        devnull = os.devnull
+        old_stderr = os.dup(2) if hasattr(os, 'dup') else None
+        if old_stderr is not None:
+            null_fd = os.open(devnull, os.O_WRONLY)
+            os.dup2(null_fd, 2)
+            os.close(null_fd)
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="y0 and y1 are.*perfectly colinear")
+                ct = CointegrationTester(prices, significance)
+                res = ct.run()
+        finally:
+            if old_stderr is not None:
+                os.dup2(old_stderr, 2)
+                os.close(old_stderr)
         if res.is_cointegrated:
             return (a, b, res.p_value, -np.log10(max(res.p_value, 1e-15)))
         return (a, b, 1.0, 0.0)
