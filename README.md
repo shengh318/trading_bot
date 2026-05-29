@@ -160,7 +160,7 @@ Data is sourced from **Yahoo Finance** (via `yfinance`), so **no Alpaca keys are
 
 ```bash
 # macOS / Linux
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01
 ```
 
 Trains RF and GBT, prints a strategy comparison table, and saves the best model (by Sharpe ratio). No baseline gate check — saves regardless.
@@ -168,7 +168,7 @@ Trains RF and GBT, prints a strategy comparison table, and saves the best model 
 #### All model types (including SGD + MLP)
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --model-types rf,gbt,xgb,lgb,sgd,mlp
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --model-types rf,gbt,xgb,lgb,sgd,mlp
 ```
 
 Trains all six model types: Random Forest, Gradient Boosting, XGBoost, LightGBM, SGD (online-capable), and MLP (deep learning). Each is backtested and compared.
@@ -176,7 +176,7 @@ Trains all six model types: Random Forest, Gradient Boosting, XGBoost, LightGBM,
 #### Grid search (auto-find best hyperparameters)
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --grid-search --model-types rf,gbt,xgb,lgb,mlp
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --grid-search --model-types rf,gbt,xgb,lgb,mlp
 ```
 
 Tries combinations of model types, tree counts, depths, and learning rates across RF/GBT/XGB/LGB/MLP. Keeps the combination with the highest validation Sharpe.
@@ -184,7 +184,7 @@ Tries combinations of model types, tree counts, depths, and learning rates acros
 #### Only save if it beats baselines
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --beat-baselines
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --beat-baselines
 ```
 
 The model is saved **only if** it beats both SmaCrossover and SimpleStrat 1 on **total return %** AND **Sharpe ratio**.
@@ -192,7 +192,7 @@ The model is saved **only if** it beats both SmaCrossover and SimpleStrat 1 on *
 #### Stacking ensemble
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --model-types rf,gbt,xgb,lgb,sgd,mlp --stacking
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --model-types rf,gbt,xgb,lgb,sgd,mlp --stacking
 ```
 
 Builds a stacking ensemble using all model types as base learners and a LogisticRegression meta-classifier. Compares ensemble performance against individual models.
@@ -200,7 +200,7 @@ Builds a stacking ensemble using all model types as base learners and a Logistic
 #### Multi-horizon ensemble
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --multi-horizon 1,5,21
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --multi-horizon 1,5,21
 ```
 
 Trains separate models for 1-day, 5-day, and 21-day forecast horizons, then averages their `predict_proba` outputs at inference for a multi-timescale signal.
@@ -208,7 +208,7 @@ Trains separate models for 1-day, 5-day, and 21-day forecast horizons, then aver
 #### Regime-aware switching
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --regime-aware
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --regime-aware
 ```
 
 Wraps the trained model with a `RegimeAwareModel` that uses Hurst exponent + choppiness index to modulate predictions: amplify confidence in trending regimes, reverse in mean-reverting regimes, suppress in choppy markets.
@@ -216,7 +216,7 @@ Wraps the trained model with a `RegimeAwareModel` that uses Hurst exponent + cho
 #### Cross-symbol context features
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --context-symbols SPY,VOO
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --context-symbols SPY,VOO
 ```
 
 Downloads additional OHLCV data for SPY and VOO, computes the same 38 features on them, and merges them into the main feature set (left-joined by timestamp, forward-filled). Adds ~76 extra context features.
@@ -224,7 +224,7 @@ Downloads additional OHLCV data for SPY and VOO, computes the same 38 features o
 #### Walk-forward validation
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --walk-forward 5
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --walk-forward 5
 ```
 
 Performs 5-fold walk-forward validation (train on expanding window, validate on next fold) for a more robust performance estimate.
@@ -232,7 +232,7 @@ Performs 5-fold walk-forward validation (train on expanding window, validate on 
 #### Kelly Criterion position sizing
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --kelly --auto-threshold
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --kelly --auto-threshold
 ```
 
 Uses Kelly-optimal position sizes instead of fixed cash tiers, and auto-tunes the confidence threshold on the validation set.
@@ -240,165 +240,69 @@ Uses Kelly-optimal position sizes instead of fixed cash tiers, and auto-tunes th
 #### Multi-day forecast horizon with trailing stop
 
 ```bash
-.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --forecast-horizon 5 --max-hold-bars 15 --trailing-stop-pct 0.07
+.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --cutoff-date 2023-01-01 --forecast-horizon 5 --max-hold-bars 15 --trailing-stop-pct 0.07
 ```
 
 Labels targets with 5-day forward returns, forces exit after 15 bars, and applies a 7% trailing stop.
 
-#### 🧪 Kitchen sink experiment (all features combined — for exploration, not deployment)
+---
 
-> **⚠️ Warning:** This enables 10+ interacting features simultaneously. If it produces a good
-> result, it is impossible to tell which parts drove the improvement. If it fails to beat
-> baselines, it is impossible to tell which parts hurt. **The recommended workflow is to
-> add one enhancement at a time**, validate that each independently improves out-of-sample
-> Sharpe, and only combine features that have individually proven their worth. This command
-> is for curiosity / exploration, not for production use.
+### Single-Command Workflow: Auto-Optimizer + Champion
+
+This is the recommended way to train a production ML model. **One command** discovers the
+optimal flag combination and saves a champion model ready for backtesting and live trading.
 
 ```bash
+# Windows (PowerShell)
+.venv\Scripts\python -m backend.ml.auto_optimize --symbols NVDA,AMD,VOO,SPY,META --years 20
+
 # macOS / Linux
-.venv/bin/python -m backend.ml.train \
-  --symbols NVDA,AMD,VOO,SPY,META \
-  --years 20 \
-  --model-types rf,gbt,sgd,mlp \
-  --grid-search --regularize \
-  --stacking --meta-labeling \
-  --walk-forward 5 --embargo 5 \
-  --regime-aware \
-  --kelly --auto-threshold \
-  --multi-horizon 1,5,21 \
-  --context-symbols SPY,VOO \
-  --labeling triple_barrier \
-  --triple-barrier-pct 0.02 --triple-barrier-max-bars 10 \
-  --beat-baselines
-
-# Windows (PowerShell — one line)
-.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --model-types rf,gbt,sgd,mlp --grid-search --regularize --stacking --meta-labeling --walk-forward 5 --embargo 5 --regime-aware --kelly --auto-threshold --multi-horizon 1,5,21 --context-symbols SPY,VOO --labeling triple_barrier --triple-barrier-pct 0.02 --triple-barrier-max-bars 10 --beat-baselines
+.venv/bin/python -m backend.ml.auto_optimize --symbols NVDA,AMD,VOO,SPY,META --years 20
 ```
 
-Enables every ML feature:
-- **Grid search** over RF/GBT/SGD/MLP with regularization — finds optimal hyperparameters
-- **Stacking ensemble** blends all model types + **meta-labeling** filters low-conviction signals
-- **Walk-forward 5** with **embargo 5** — robust purged cross-validation
-- **Regime-aware** — Hurst + choppiness modulation
-- **Kelly sizing** + **auto-threshold** — optimal position sizing
-- **Multi-horizon** (1, 5, 21 day) — multi-timescale predictions
-- **Context symbols** (SPY/VOO) — macro cross-asset features
-- **Triple barrier labeling** — profit target / stop-loss / time-based exits
-- **Beat baselines** — only saves if it outperforms SMA crossover + SimpleStrat 1
+#### What it does
 
-Training time is significantly longer than basic mode.
+**Phase 1 — Forward selection (10 steps)**
+Tests each enhancement independently, only keeping flags that improve Sharpe:
 
----
+1. Train baseline (RF + GBT)
+2. Add `--grid-search`
+3. Add `--walk-forward 5`
+4. Try all 6 model types (`rf,gbt,xgb,lgb,sgd,mlp`)
+5. Add `--stacking`
+6. Add `--multi-horizon 1,5,21`
+7. Add `--regime-aware`
+8. Add `--context-symbols SPY,VOO`
+9. Add `--kelly --auto-threshold`
+10. Add triple-barrier labeling
 
-### Recommended Workflow: Add One Enhancement at a Time
+**Phase 2 — Champion training**
+Takes the optimal flags from Phase 1, forces `--grid-search` + `--walk-forward 5` for
+rigorous validation, trains with `--beat-baselines`, and saves the model as
+`backend/ml/models/champion_auto.joblib`. Intermediate step models are cleaned up.
 
-> **Why this matters.** Combining 10+ features at once makes it impossible to know which part
-> drove the result. The correct approach is to start with a bare baseline, add one enhancement
-> per run, validate that each independently **improves out-of-sample Sharpe**, and only combine
-> things that have individually proven their worth.
+#### After the run
 
-#### Step 1 — Train a baseline to beat
+The saved `champion_auto.joblib` is loaded automatically by the **ML Strategy** in the
+frontend. To use it:
+
+1. Start the API: `.venv\Scripts\uvicorn backend.api.main:app --reload`
+2. Open the frontend, go to **Backtest** or **Live**
+3. Select **ML Strategy** — it will load `champion_auto.joblib`
+
+#### Skipping steps
+
+Use `--skip-*` flags to ignore enhancements that don't apply to your dataset:
 
 ```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name baseline
-```
-Train RF + GBT on default params. Note the validation Sharpe. **This is your reference point.** Every enhancement must improve on it.
-
----
-
-#### Step 2 — Add grid search (find better hyperparams)
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step2_grid --grid-search
-```
-If validation Sharpe improves → keep grid search. If not → skip it for this dataset.
-
----
-
-#### Step 3 — Add walk-forward validation
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step3_wf --walk-forward 5 --grid-search
-```
-More robust performance estimate. Compare averaged Sharpe across folds to the single-split baseline.
-
----
-
-#### Step 4 — Try more model types (SGD, MLP)
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step4_models --model-types rf,gbt,xgb,lgb,sgd,mlp --grid-search --walk-forward 5
-```
-Compare all six types. SGD enables online learning later; MLP may capture nonlinear patterns.
-If none beat the baseline, revert to `rf,gbt` (faster, more reliable).
-
----
-
-#### Step 5 — Add stacking ensemble
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step5_stack --model-types rf,gbt,xgb,lgb --stacking --grid-search --walk-forward 5
-```
-Does the meta-model blend improve Sharpe over the best single model? If not, stacking adds complexity without benefit.
-
----
-
-#### Step 6 — Add multi-horizon ensemble
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step6_mh --model-types rf,gbt --multi-horizon 1,5,21 --stacking --walk-forward 5
-```
-If multi-timescale predictions improve Sharpe → keep it. If it dilutes signal → skip.
-
----
-
-#### Step 7 — Add regime-aware modulation
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step7_regime --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5
-```
-Does Hurst/choppiness modulation help? Compare the averaged regime-aware predictions to unmodulated.
-
----
-
-#### Step 8 — Add context symbols (market macro features)
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step8_context --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5
-```
-Market-wide features (SPY, VOO) add ~76 columns. If Sharpe improves → keep. If it hurts → context may be adding noise for your symbols.
-
----
-
-#### Step 9 — Add Kelly sizing + auto-threshold
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step9_kelly --kelly --auto-threshold --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5
-```
-Kelly optimizes position sizing; auto-threshold finds the best confidence cutoff. Both should improve risk-adjusted returns independently.
-
----
-
-#### Step 10 — Add triple-barrier labeling
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name step10_tb --labeling triple_barrier --triple-barrier-pct 0.02 --triple-barrier-max-bars 10 --kelly --auto-threshold --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5 --beat-baselines
-```
-de Prado's profit-target / stop-loss labeling. More realistic than next-bar direction. Only saves if it beats both baselines.
-
----
-
-#### Step 11 — Lock in with `--beat-baselines`
-
-Take your best-performing combination and add `--beat-baselines` to make sure it outperforms SmaCrossover + SimpleStrat 1 before saving:
-
-```bash
-python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20 --name champion --kelly --auto-threshold --context-symbols SPY,VOO --regime-aware --stacking --multi-horizon 1,5,21 --walk-forward 5 --labeling triple_barrier --beat-baselines
+# Skip walk-forward and stacking for a quick run on small data
+.venv\Scripts\python -m backend.ml.auto_optimize --symbols AAPL,MSFT --years 5 --skip-walk-forward --skip-stacking
 ```
 
-Only the flags that actually improved Sharpe should be included. If a feature didn't help, leave it out.
+#### Re-training manually
 
----
+The command at the end of the auto-optimizer output shows the exact `train.py` invocation
+to reproduce the champion. Run it any time with a different `--name` to create variants.
 
 ### All CLI Options
 
