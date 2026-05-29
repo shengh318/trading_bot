@@ -473,10 +473,10 @@ The report is saved as `pairs_report_<timestamp>.md` by default. Customize with 
 | `universe` | `sp500` | `sp500`, `nasdaq100`, `dow30`, or comma-separated tickers |
 | `-o` / `--output` | `pairs_report_<timestamp>.md` | Output Markdown file path |
 | `--min-corr` | `0.5` | Minimum Pearson correlation (Phase 1 filter) |
-| `--min-sharpe` | `1.0` | Minimum Sharpe ratio filter |
-| `--min-return` | `0.0` | Minimum total return % filter |
-| `--max-drawdown` | `-50.0` | Maximum drawdown % filter |
-| `--top-candidates` | `30` | Number of cointegrated pairs to fully analyze |
+| `--min-sharpe` | `0.0` | Minimum Sharpe ratio filter (0 = any non-negative) |
+| `--min-return` | `-1000.0` | Minimum total return % filter |
+| `--max-drawdown` | `-100.0` | Maximum drawdown % filter |
+| `--top-candidates` | `50` | Number of cointegrated pairs to fully analyze |
 | `--require-mean-reverting` | — | Only keep pairs in mean-reverting regime |
 | `--require-no-breaks` | — | Exclude pairs with structural breaks |
 | `--start` | `2015-01-01` | Start date for analysis |

@@ -371,20 +371,20 @@ Examples:
         help="Minimum Pearson correlation for Phase 1 filter (default: 0.5)",
     )
     parser.add_argument(
-        "--min-sharpe", type=float, default=1.0,
-        help="Minimum Sharpe ratio (default: 1.0)",
+        "--min-sharpe", type=float, default=0.0,
+        help="Minimum Sharpe ratio (default: 0.0)",
     )
     parser.add_argument(
-        "--min-return", type=float, default=0.0,
-        help="Minimum total return %% (default: 0.0)",
+        "--min-return", type=float, default=-1000.0,
+        help="Minimum total return %% (default: -1000.0)",
     )
     parser.add_argument(
-        "--max-drawdown", type=float, default=-50.0,
-        help="Maximum drawdown %% (default: -50.0)",
+        "--max-drawdown", type=float, default=-100.0,
+        help="Maximum drawdown %% (default: -100.0)",
     )
     parser.add_argument(
-        "--top-candidates", type=int, default=30,
-        help="Number of top cointegrated pairs to fully analyze (default: 30)",
+        "--top-candidates", type=int, default=50,
+        help="Number of top cointegrated pairs to fully analyze (default: 50)",
     )
     parser.add_argument(
         "--require-mean-reverting", action="store_true",
@@ -424,7 +424,7 @@ Examples:
     print(f"Period:       {args.start} -> today")
     print(f"Min corr:     {args.min_corr}")
     print(f"Filters:      Sharpe >= {args.min_sharpe}, Return >= {args.min_return}%, DD >= {args.max_drawdown}%")
-    print(f"Candidates:   {args.top_candidates}")
+    print(f"Top N:        {args.top_candidates}")
     print(f"Output:       {output_file}")
     print(f"{'='*60}\n")
 
