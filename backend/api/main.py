@@ -11,6 +11,7 @@ from backend.api.live_routes import live_router
 from backend.api.live_websocket import live_ws_router
 from backend.api.alpaca_routes import alpaca_router
 from backend.api.ml_routes import router as ml_router
+from backend.api.pairs_routes import router as pairs_router
 from backend.config import validate_config
 from backend.data.store import Database
 
@@ -37,6 +38,7 @@ app.include_router(live_router)
 app.include_router(live_ws_router)
 app.include_router(alpaca_router)
 app.include_router(ml_router)
+app.include_router(pairs_router)
 
 
 @app.get("/api/health")

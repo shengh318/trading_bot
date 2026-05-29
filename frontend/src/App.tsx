@@ -5,9 +5,11 @@ import Backtest from "./pages/Backtest";
 import Strategies from "./pages/Strategies";
 import Live from "./pages/Live";
 import MlLab from "./pages/MlLab";
+import Correlation from "./pages/Correlation";
+import Pairs from "./pages/Pairs";
 import Clock from "./components/Clock";
 
-type Tab = "dashboard" | "backtest" | "strategies" | "live" | "ml";
+type Tab = "dashboard" | "backtest" | "strategies" | "live" | "ml" | "correlation" | "pairs";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "dashboard", label: "Dashboard" },
@@ -15,6 +17,8 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "backtest", label: "Backtest" },
   { key: "strategies", label: "Strategies" },
   { key: "ml", label: "ML Lab" },
+  { key: "correlation", label: "Correlation" },
+  { key: "pairs", label: "Pairs" },
 ];
 
 export default function App() {
@@ -65,6 +69,8 @@ export default function App() {
       {activeTab === "backtest" && <Backtest />}
       {activeTab === "strategies" && <Strategies />}
       {activeTab === "ml" && <MlLab />}
+      {activeTab === "correlation" && <Correlation />}
+      {activeTab === "pairs" && <Pairs />}
     </div>
   );
 }

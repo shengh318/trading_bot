@@ -1,4 +1,5 @@
 from typing import Any, Optional
+from datetime import date
 
 from pydantic import BaseModel
 
@@ -51,6 +52,19 @@ class MlRetrainResponse(BaseModel):
     status: str
     pid: int | None = None
     message: str = ""
+
+
+class CorrelationPoint(BaseModel):
+    time: str
+    value: float
+
+
+class CorrelationDataResponse(BaseModel):
+    symbol_a: str
+    symbol_b: str
+    correlations: dict[str, list[CorrelationPoint]]
+    cumulative_returns: dict[str, list[CorrelationPoint]]
+    statistics: dict[str, float]
 
 
 class AccountSummary(BaseModel):
@@ -122,6 +136,175 @@ class BacktestRunResponse(BaseModel):
     initial_cash: float
     metrics: Optional[BacktestMetrics] = None
     created_at: str
+
+
+# ── Pairs Trading Models ─────────────────────────────────────────────────
+
+
+class PairAnalysisRequest(BaseModel):
+    ticker_a: str
+    ticker_b: str
+    start: str = "2015-01-01"
+    end: str | None = None
+    significance: float = 0.05
+    run_johansen: bool = True
+
+
+class CorrelationMetrics(BaseModel):
+    window: int
+    current: float
+    mean: float
+    std: float
+    drift: float = 0.0
+    regime_changes: int = 0
+    threshold_crossings: dict[str, int] = {}
+    correlation_collapse: bool = False
+    overall_slope: float = 0.0
+    max_correlation_drawdown: float = 0.0
+    stability_score: float = 0.0
+
+
+class CointegrationResultModel(BaseModel):
+    method: str
+    p_value: float
+    test_statistic: float
+    critical_values: dict[str, float]
+    hedge_ratio: float
+    hedge_ratio_intercept: float = 0.0
+    hedge_ratio_method: str = "ols"
+    is_cointegrated: bool
+
+
+class JohansenResultModel(BaseModel):
+    is_cointegrated: bool
+    trace_statistic: float
+    trace_critical_values: dict[str, float]
+    eigenvalue_statistic: float
+    eigenvalue_critical_values: dict[str, float]
+
+
+class SpreadResultModel(BaseModel):
+    mean: float
+    std: float
+    current_zscore: float
+    half_life: float
+    hurst_exponent: float
+    adf_statistic: float = 0.0
+    adf_pvalue: float = 1.0
+    is_stationary: bool = False
+    mean_reversion_speed: float = 0.0
+    expected_time_to_mean: float = 0.0
+    persistence: float = 0.0
+    spread_autocorr_5: float = 0.0
+    variance_ratio: float = 1.0
+    spread_series: list[dict[str, float]]
+    zscore_series: list[dict[str, float]]
+
+
+class RegimeResultModel(BaseModel):
+    current_regime: str = "unknown"
+    trading_allowed: bool = True
+    signal_suppressed: bool = False
+    structural_break: bool = False
+    correlation_breakdown: bool = False
+    spread_variance_expansion: bool = False
+    vix_level: float = 0.0
+    regime_summary: dict[str, float] = {}
+    cusum_break_detected: bool = False
+    cusum_break_indices: list[int] = []
+    chow_break_detected: bool = False
+    chow_break_dates: list[str] = []
+    bai_perron_breaks: list[int] = []
+    num_structural_breaks: int = 0
+
+
+class WalkForwardMetrics(BaseModel):
+    avg_train_p_value: float = 1.0
+    avg_oos_p_value: float = 1.0
+    avg_half_life: float
+    cointegration_percentage: float
+    avg_spread_sharpe: float
+    hedge_ratio_stability: float
+    avg_spread_drawdown: float = 0.0
+    oos_stationarity_pct: float = 0.0
+    regime_stability_pct: float = 0.0
+    num_folds: int
+
+
+class WFBacktestMetricsModel(BaseModel):
+    total_return_pct: float = 0.0
+    annualised_return_pct: float = 0.0
+    sharpe_ratio: float = 0.0
+    max_drawdown_pct: float = 0.0
+    win_rate_pct: float = 0.0
+    num_trades: int = 0
+    avg_holding_period: float = 0.0
+    turnover: float = 0.0
+    num_folds: int = 0
+
+
+class BacktestMetricsModel(BaseModel):
+    total_return_pct: float
+    annualised_return_pct: float = 0.0
+    sharpe_ratio: float
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+    max_drawdown_pct: float
+    win_rate_pct: float
+    num_trades: int
+    avg_holding_period: float
+    turnover: float
+    final_equity: float
+    profit_factor: float = 0.0
+    exposure_pct: float = 0.0
+    beta_to_market: float = 0.0
+    equity_curve: list[dict[str, float]]
+    drawdown_series: list[dict[str, float]] = []
+
+
+class PairData(BaseModel):
+    ticker_a: str
+    ticker_b: str
+    correlations: list[CorrelationMetrics]
+    cointegration: CointegrationResultModel
+    johansen: JohansenResultModel | None = None
+    spread: SpreadResultModel
+    walk_forward: WalkForwardMetrics
+    backtest: BacktestMetricsModel
+    wf_backtest: WFBacktestMetricsModel = WFBacktestMetricsModel()
+    regime: RegimeResultModel = RegimeResultModel()
+    score: float = 0.0
+
+
+class PairAnalysisResponse(BaseModel):
+    status: str = "ok"
+    pair: PairData
+
+
+class PairRankRequest(BaseModel):
+    pairs: list[list[str]]
+    start: str = "2015-01-01"
+    end: str | None = None
+    significance: float = 0.05
+    top_n: int = 10
+
+
+class PairRankResponse(BaseModel):
+    status: str = "ok"
+    ranked_pairs: list[PairData]
+
+
+class HeatmapRequest(BaseModel):
+    tickers: list[str]
+    start: str = "2015-01-01"
+    end: str | None = None
+    significance: float = 0.05
+
+
+class HeatmapResponse(BaseModel):
+    status: str = "ok"
+    tickers: list[str]
+    matrix: dict[str, dict[str, float]]
 
 
 def _resolve_profit_factor(row: dict) -> float:

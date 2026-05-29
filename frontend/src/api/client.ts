@@ -254,6 +254,45 @@ export class ApiClient {
       method: "DELETE",
     });
   }
+
+  async analyzePair(req: PairAnalysisRequest): Promise<PairAnalysisResponse> {
+    return this._fetch(`${this.base}/api/pairs/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+  }
+
+  async rankPairs(req: PairRankRequest): Promise<PairRankResponse> {
+    return this._fetch(`${this.base}/api/pairs/rank`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+  }
+
+  async buildHeatmap(req: HeatmapRequest): Promise<HeatmapResponse> {
+    return this._fetch(`${this.base}/api/pairs/heatmap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+  }
+
+  async getCorrelationData(
+    symbolA: string,
+    symbolB: string,
+    years = 5,
+    windows = "20,60,120"
+  ): Promise<CorrelationData> {
+    const params = new URLSearchParams({
+      symbol_a: symbolA,
+      symbol_b: symbolB,
+      years: String(years),
+      windows,
+    });
+    return this._fetch(`${this.base}/api/correlation/data?${params}`);
+  }
 }
 
 export type WsCallback = {
@@ -437,6 +476,187 @@ export interface MlRetrainResponse {
   status: string;
   pid?: number;
   message: string;
+}
+
+export interface CorrelationData {
+  symbol_a: string;
+  symbol_b: string;
+  correlations: Record<string, { time: string; value: number }[]>;
+  cumulative_returns: Record<string, { time: string; value: number }[]>;
+  statistics: Record<string, number>;
+}
+
+// ── Pairs Trading Types ─────────────────────────────────────────────────
+
+export interface CorrelationMetrics {
+  window: number;
+  current: number;
+  mean: number;
+  std: number;
+  drift?: number;
+  regime_changes?: number;
+  threshold_crossings?: Record<string, number>;
+  correlation_collapse?: boolean;
+  overall_slope?: number;
+  max_correlation_drawdown?: number;
+  stability_score?: number;
+}
+
+export interface CointegrationResult {
+  method: string;
+  p_value: number;
+  test_statistic: number;
+  critical_values: Record<string, number>;
+  hedge_ratio: number;
+  hedge_ratio_intercept?: number;
+  hedge_ratio_method?: string;
+  is_cointegrated: boolean;
+}
+
+export interface JohansenResult {
+  is_cointegrated: boolean;
+  trace_statistic: number;
+  trace_critical_values: Record<string, number>;
+  eigenvalue_statistic: number;
+  eigenvalue_critical_values: Record<string, number>;
+}
+
+export interface SpreadResult {
+  mean: number;
+  std: number;
+  current_zscore: number;
+  half_life: number;
+  hurst_exponent: number;
+  adf_statistic?: number;
+  adf_pvalue?: number;
+  is_stationary?: boolean;
+  mean_reversion_speed?: number;
+  expected_time_to_mean?: number;
+  persistence?: number;
+  spread_autocorr_5?: number;
+  variance_ratio?: number;
+  variance_explosion_events?: number;
+  spread_series: { time: number; value: number }[];
+  zscore_series: { time: number; value: number }[];
+}
+
+export interface RegimeResult {
+  current_regime: string;
+  trading_allowed: boolean;
+  signal_suppressed: boolean;
+  structural_break: boolean;
+  correlation_breakdown: boolean;
+  spread_variance_expansion: boolean;
+  vix_level: number;
+  regime_summary: Record<string, number>;
+  cusum_break_detected?: boolean;
+  cusum_break_indices?: number[];
+  chow_break_detected?: boolean;
+  chow_break_dates?: string[];
+  bai_perron_breaks?: number[];
+  num_structural_breaks?: number;
+}
+
+export interface WalkForwardMetrics {
+  avg_train_p_value: number;
+  avg_oos_p_value: number;
+  avg_half_life: number;
+  cointegration_percentage: number;
+  avg_spread_sharpe: number;
+  hedge_ratio_stability: number;
+  avg_spread_drawdown?: number;
+  oos_stationarity_pct?: number;
+  regime_stability_pct?: number;
+  num_folds: number;
+}
+
+export interface BacktestMetricsPair {
+  total_return_pct: number;
+  annualised_return_pct?: number;
+  sharpe_ratio: number;
+  sortino_ratio?: number;
+  calmar_ratio?: number;
+  max_drawdown_pct: number;
+  win_rate_pct: number;
+  num_trades: number;
+  avg_holding_period: number;
+  turnover: number;
+  final_equity: number;
+  profit_factor?: number;
+  exposure_pct?: number;
+  beta_to_market?: number;
+  alpha?: number;
+  beta?: number;
+  information_ratio?: number;
+  tracking_error?: number;
+  equity_curve: { time: number; value: number }[];
+  drawdown_series?: { time: number; value: number }[];
+}
+
+export interface WFBacktestMetrics {
+  total_return_pct?: number;
+  annualised_return_pct?: number;
+  sharpe_ratio?: number;
+  max_drawdown_pct?: number;
+  win_rate_pct?: number;
+  num_trades?: number;
+  avg_holding_period?: number;
+  turnover?: number;
+  num_folds?: number;
+}
+
+export interface PairData {
+  ticker_a: string;
+  ticker_b: string;
+  correlations: CorrelationMetrics[];
+  cointegration: CointegrationResult;
+  johansen: JohansenResult | null;
+  spread: SpreadResult;
+  walk_forward: WalkForwardMetrics;
+  backtest: BacktestMetricsPair;
+  wf_backtest?: WFBacktestMetrics;
+  regime: RegimeResult;
+  score: number;
+}
+
+export interface PairAnalysisRequest {
+  ticker_a: string;
+  ticker_b: string;
+  start?: string;
+  end?: string;
+  significance?: number;
+  run_johansen?: boolean;
+}
+
+export interface PairRankRequest {
+  pairs: string[][];
+  start?: string;
+  end?: string;
+  significance?: number;
+  top_n?: number;
+}
+
+export interface HeatmapRequest {
+  tickers: string[];
+  start?: string;
+  end?: string;
+  significance?: number;
+}
+
+export interface PairAnalysisResponse {
+  status: string;
+  pair: PairData;
+}
+
+export interface PairRankResponse {
+  status: string;
+  ranked_pairs: PairData[];
+}
+
+export interface HeatmapResponse {
+  status: string;
+  tickers: string[];
+  matrix: Record<string, Record<string, number>>;
 }
 
 export const api = new ApiClient();

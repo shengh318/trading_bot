@@ -5,12 +5,21 @@ import os
 import signal
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from fastapi import APIRouter, HTTPException, Query
 
-from backend.api.models import MlModelInfo, MlRetrainRequest, MlRetrainResponse
+from backend.api.models import (
+    CorrelationDataResponse,
+    CorrelationPoint,
+    MlModelInfo,
+    MlRetrainRequest,
+    MlRetrainResponse,
+)
 from backend.ml.model import delete_model, list_models, load_model
 
 router = APIRouter()
@@ -161,3 +170,125 @@ def delete_ml_model(name: str, version: int | None = None):
     """Delete a model, optionally a specific version."""
     delete_model(name, version=version)
     return {"status": "deleted", "name": name, "version": version}
+
+
+# ── Correlation data ──────────────────────────────────────────────────────
+
+
+def _safe(val: float, default: float = 0.0) -> float:
+    """Return *val* if it's a finite number, otherwise *default*."""
+    if val is None:
+        return default
+    try:
+        return val if np.isfinite(val) else default
+    except (TypeError, ValueError):
+        return default
+
+
+@router.get("/api/correlation/data", response_model=CorrelationDataResponse)
+def get_correlation_data(
+    symbol_a: str = Query("NVDA", description="First symbol"),
+    symbol_b: str = Query("SPY", description="Second symbol"),
+    years: int = Query(5, description="Years of history"),
+    windows: str = Query("20,60,120", description="Comma-separated rolling windows"),
+):
+    """Download two symbols and compute rolling correlations + summary statistics."""
+    try:
+        window_list = [int(w.strip()) for w in windows.split(",") if w.strip()]
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid window value; must be comma-separated integers")
+    end = datetime.now()
+    start = end - timedelta(days=int(years * 365.25) + 10)
+
+    raw = yf.download([symbol_a, symbol_b], start=start, end=end, auto_adjust=True, progress=False)
+    if raw.empty or "Close" not in raw.columns:
+        raise HTTPException(status_code=502, detail="No data returned from Yahoo Finance")
+
+    closes = raw["Close"].dropna(how="all")
+    if closes.empty:
+        raise HTTPException(status_code=502, detail="No close price data available")
+
+    prices = closes.ffill()
+    if symbol_a not in prices.columns or symbol_b not in prices.columns:
+        raise HTTPException(status_code=404, detail=f"One or both symbols not found in data")
+
+    pa = prices[symbol_a]
+    pb = prices[symbol_b]
+
+    if pa.isna().all() or pb.isna().all():
+        raise HTTPException(status_code=502, detail="No price data available for one or both symbols")
+
+    returns_a = pa.pct_change(fill_method=None).dropna()
+    returns_b = pb.pct_change(fill_method=None).dropna()
+    common_idx = returns_a.index.intersection(returns_b.index)
+    returns_a = returns_a.loc[common_idx]
+    returns_b = returns_b.loc[common_idx]
+
+    correlations: dict[str, list[dict]] = {}
+    for w in window_list:
+        corr = returns_a.rolling(w).corr(returns_b)
+        correlations[str(w)] = [
+            {"time": str(idx.date()), "value": round(float(v), 4)}
+            for idx, v in corr.items()
+            if not (pd.isna(v) or pd.isna(idx))
+        ]
+
+    norm_a = pa / pa.dropna().iloc[0] * 100
+    norm_b = pb / pb.dropna().iloc[0] * 100
+    common_px = norm_a.index.intersection(norm_b.index)
+    cumulative_returns = {
+        symbol_a: [
+            {"time": str(idx.date()), "value": round(float(norm_a.loc[idx]), 4)}
+            for idx in common_px
+            if not pd.isna(idx) and not pd.isna(norm_a.loc[idx])
+        ],
+        symbol_b: [
+            {"time": str(idx.date()), "value": round(float(norm_b.loc[idx]), 4)}
+            for idx in common_px
+            if not pd.isna(idx) and not pd.isna(norm_b.loc[idx])
+        ],
+    }
+
+    # Statistics
+    from scipy.stats import pearsonr, spearmanr, kendalltau
+    aligned = pd.concat([returns_a, returns_b], axis=1).dropna()
+    if len(aligned) < 5:
+        raise HTTPException(status_code=422, detail="Not enough data after alignment")
+
+    r_vals = aligned.iloc[:, 0].values
+    s_vals = aligned.iloc[:, 1].values
+    pr, pp = pearsonr(r_vals, s_vals)
+    sr, sp = spearmanr(r_vals, s_vals)
+    kt, kp = kendalltau(r_vals, s_vals)
+
+    long_corr = returns_a.rolling(60).corr(returns_b).dropna()
+    corr_std = float(long_corr.std()) if len(long_corr) > 0 else 0.0
+
+    split = int(len(aligned) * 0.6)
+    in_sample = aligned.iloc[:split]
+    out_sample = aligned.iloc[split:]
+    oos_drop = 0.0
+    if len(in_sample) > 10 and len(out_sample) > 10:
+        r_in, _ = pearsonr(in_sample.iloc[:, 0].values, in_sample.iloc[:, 1].values)
+        r_out, _ = pearsonr(out_sample.iloc[:, 0].values, out_sample.iloc[:, 1].values)
+        if np.isfinite(r_in) and np.isfinite(r_out):
+            oos_drop = round(abs(r_in - r_out), 4)
+
+    statistics = {
+        "pearson_r": round(_safe(float(pr)), 4),
+        "pearson_p": round(_safe(float(pp)), 6),
+        "spearman_r": round(_safe(float(sr)), 4),
+        "spearman_p": round(_safe(float(sp)), 6),
+        "kendall_tau": round(_safe(float(kt)), 4),
+        "kendall_p": round(_safe(float(kp)), 6),
+        "rolling_corr_std": round(_safe(corr_std), 4),
+        "oos_corr_drop": _safe(oos_drop),
+    }
+
+    return CorrelationDataResponse(
+        symbol_a=symbol_a,
+        symbol_b=symbol_b,
+        correlations=correlations,
+        cumulative_returns=cumulative_returns,
+        statistics=statistics,
+    )
