@@ -51,7 +51,7 @@ MULTIPLE_COMPARISON_METHOD: str = "bh"
 
 # ── Auto-Discovery ────────────────────────────────
 AUTO_DISCOVER_TOP_CANDIDATES: int = 50
-AUTO_DISCOVER_MIN_SHARPE: float = 0.0
+AUTO_DISCOVER_MIN_SHARPE: float = 0.1
 AUTO_DISCOVER_MIN_RETURN_PCT: float = -1000.0
 AUTO_DISCOVER_MAX_DRAWDOWN_PCT: float = -100.0
 

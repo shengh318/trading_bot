@@ -181,7 +181,7 @@ class RegimeDetector:
 
         num_structural_breaks = len(bai_perron_breaks)
         overall_structural_break = (
-            structural_break or cusum_detected or chow_detected or num_structural_breaks > 0
+            structural_break or cusum_detected or chow_detected or num_structural_breaks >= 2
         )
 
         trading_allowed = current_regime not in (

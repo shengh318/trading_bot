@@ -25,7 +25,7 @@ import argparse
 import logging
 import sys
 import tempfile
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import numpy as np
@@ -55,6 +55,57 @@ if not logger.handlers:
 
 
 _UNIVERSE_PRESETS = {"sp500", "nasdaq100", "dow30"}
+
+
+def _download_prices(
+    tickers: list[str],
+    start: str,
+    end: str,
+    max_workers: int = 10,
+) -> pd.DataFrame:
+    """Download each ticker individually in parallel, then outer-join.
+
+    yfinance's multi-ticker ``yf.download()`` returns only the common date
+    intersection of all requested tickers — if any single ticker has a short
+    history the **entire** batch is truncated.  Parallel individual downloads
+    + outer join preserves every ticker's full history.
+    """
+    def _dl_one(t: str) -> tuple[str, pd.DataFrame | None]:
+        try:
+            raw = yf.download(t, start=start, end=end, auto_adjust=True, progress=False)
+            if raw.empty or "Close" not in raw.columns:
+                return t, None
+            close = raw["Close"].squeeze()
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            return t, close.to_frame(t)
+        except Exception:
+            return t, None
+
+    results: list[pd.DataFrame] = []
+    failed: list[str] = []
+    n = len(tickers)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_dl_one, t): t for t in tickers}
+        for i, future in enumerate(as_completed(futures), 1):
+            t, df = future.result()
+            if df is not None and not df.empty:
+                results.append(df)
+            else:
+                failed.append(t)
+            if i % 50 == 0 or i == n:
+                logger.info(f"  Download progress: {i}/{n} tickers")
+
+    if not results:
+        raise ValueError("No data downloaded for any ticker")
+
+    all_prices = results[0]
+    for df in results[1:]:
+        all_prices = all_prices.join(df, how="outer")
+
+    if failed:
+        logger.warning(f"Failed to download {len(failed)}/{n} tickers: {failed}")
+    return all_prices
 
 
 def _compute_correlation_matrix(prices: pd.DataFrame) -> pd.DataFrame:
@@ -97,7 +148,8 @@ def _test_coint(args: tuple) -> tuple[str, str, float, float]:
     """Quick EG cointegration test on a single pair using cached parquet data."""
     a, b, data_path, significance = args
     try:
-        prices = pd.read_parquet(data_path, columns=[a, b])
+        prices = pd.read_parquet(data_path, columns=[a, b]).ffill()
+        prices = prices.dropna(how="any")
         if len(prices) < 50:
             return (a, b, 1.0, 0.0)
         corr_val = prices[a].corr(prices[b])
@@ -118,17 +170,30 @@ def _test_coint(args: tuple) -> tuple[str, str, float, float]:
 
 
 def _analyze_full(args: tuple):
-    """Full pipeline for a single pair."""
-    a, b, start, end, significance, capital = args
+    """Full pipeline for a single pair.
+
+    The 7th element (*prices*) is an optional pre-fetched DataFrame that
+    ``PairAnalyzer`` uses instead of re-downloading from yfinance.
+    """
+    if len(args) == 7:
+        a, b, start, end, significance, capital, prices = args
+    else:
+        a, b, start, end, significance, capital = args
+        prices = None
     try:
+        if prices is not None and len(prices) < 336:
+            logger.warning(f"Skipping {a}/{b}: only {len(prices)} days (need ≥336)")
+            return None
         analyzer = PairAnalyzer(
             a, b, start, end,
             significance=significance,
             capital=capital,
+            prices=prices,
         )
         return analyzer.analyze()
     except Exception as e:
-        logger.error(f"Full analysis failed {a}/{b}: {e}")
+        import traceback
+        logger.error(f"Full analysis failed {a}/{b}: {e}\n{traceback.format_exc()}")
         return None
 
 
@@ -163,46 +228,23 @@ def find_pairs(
     logger.info(f"Universe: {n} tickers")
     logger.info(f"Period: {start} -> {end}")
 
-    # ── Phase 1: Batch download + correlation filter ──
-    # Download in batches of 50 to avoid yfinance date-range truncation
-    # that occurs when requesting 500 tickers in a single call.
-    logger.info(f"Phase 1: Downloading {n} tickers in batches ...")
-    batch_size = 50
-    all_prices: pd.DataFrame | None = None
-    failed_tickers: list[str] = []
-    for batch_start in range(0, n, batch_size):
-        batch = tickers[batch_start:batch_start + batch_size]
-        try:
-            raw = yf.download(batch, start=start, end=end, auto_adjust=True, progress=False)
-            if isinstance(raw.columns, pd.MultiIndex):
-                batch_prices = raw["Close"].copy()
-            else:
-                batch_prices = raw.copy()
-        except Exception as e:
-            logger.warning(f"Batch download failed for {batch}: {e}")
-            failed_tickers.extend(batch)
-            continue
-        if all_prices is None:
-            all_prices = batch_prices
-        else:
-            all_prices = all_prices.join(batch_prices, how="outer")
-
-    if all_prices is None or all_prices.empty:
-        logger.error("No data downloaded for any ticker")
+    # ── Phase 1: Download + correlation filter ──
+    # Download each ticker individually and outer-join to prevent yfinance
+    # from truncating the date range to the common intersection.
+    logger.info(f"Phase 1: Downloading {n} tickers individually ...")
+    all_prices = _download_prices(tickers, start, end)
+    if len(all_prices.columns) < 2:
+        logger.error("Fewer than 2 valid tickers remaining after filtering")
         return []
 
-    # Drop tickers with insufficient data
     min_rows = 252
     valid = [c for c in all_prices.columns if all_prices[c].notna().sum() >= min_rows]
-    dropped = set(all_prices.columns) - set(valid) | set(failed_tickers)
+    dropped = set(all_prices.columns) - set(valid)
     if dropped:
         logger.warning(f"Dropped {len(dropped)} tickers with insufficient data")
         all_prices = all_prices[valid]
     all_prices = all_prices.ffill()
-    if len(all_prices.columns) < 2:
-        logger.error("Fewer than 2 valid tickers remaining after filtering")
-        return []
-    tickers = valid
+    tickers = [c for c in valid if c in all_prices.columns]
     n = len(tickers)
     logger.info(f"  Got {len(all_prices)} rows x {len(all_prices.columns)} columns ({n} valid tickers)")
 
@@ -260,7 +302,10 @@ def find_pairs(
     logger.info(f"Phase 3: Running full pipeline on top {len(candidates)} candidates ...")
 
     pair_args = [
-        (a, b, start, end, significance, capital)
+        (
+            a, b, start, end, significance, capital,
+            all_prices[[a, b]].ffill().dropna(how="any").copy(),
+        )
         for a, b, _, _ in candidates
     ]
 
@@ -343,8 +388,8 @@ Examples:
         help="Minimum Pearson correlation for Phase 1 filter (default: 0.5)",
     )
     parser.add_argument(
-        "--min-sharpe", type=float, default=0.0,
-        help="Minimum Sharpe ratio (default: 0.0)",
+        "--min-sharpe", type=float, default=AUTO_DISCOVER_MIN_SHARPE,
+        help="Minimum Sharpe ratio (default: 0.1)",
     )
     parser.add_argument(
         "--min-return", type=float, default=-1000.0,

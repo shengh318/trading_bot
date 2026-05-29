@@ -297,18 +297,16 @@ class TradingStrategy:
 
         alloc = capital_per_leg * scale
         a_shares = pos * alloc / a_price
-        b_shares = -pos * alloc / (b_price * self.hedge_ratio) if self.hedge_ratio != 0 else 0.0
+        b_shares = -a_shares * self.hedge_ratio if self.hedge_ratio != 0 else 0.0
 
         if self.beta_neutral and self.hedge_ratio != 0:
-            beta_a = self.market_beta
-            beta_b = self.market_beta * self.hedge_ratio
-            hedge_leg_b = abs(a_shares * a_price * beta_a / (b_price * beta_b))
-            b_shares = -np.sign(pos) * hedge_leg_b
+            b_shares = -a_shares * self.market_beta
 
         gross = abs(a_shares * a_price) + abs(b_shares * b_price)
         slippage_cost = gross * self.slippage
         tcost = gross * self.transaction_cost
         total_cost = slippage_cost + tcost
+        net_cash_flow = a_shares * a_price + b_shares * b_price
 
         idx_date = self.prices.index[i]
         if hasattr(idx_date, "date"):
@@ -323,9 +321,9 @@ class TradingStrategy:
             "entry_price_b": float(b_price),
             "shares_a": float(a_shares),
             "shares_b": float(b_shares),
-            "capital_at_entry": cash - total_cost,
+            "capital_at_entry": cash,
         }
-        return direction, a_shares, b_shares, cash - total_cost - capital_per_leg * 2 * scale, entry
+        return direction, a_shares, b_shares, cash - net_cash_flow - total_cost, entry
 
     def _close_position(
         self,

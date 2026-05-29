@@ -104,7 +104,8 @@ def _get_sp500_tickers() -> list[str]:
         table = _fetch_wikipedia_table(
             "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
         )[0]
-        tickers = sorted(table["Symbol"].tolist())
+        col = "Symbol" if "Symbol" in table.columns else table.columns[0]
+        tickers = sorted(table[col].tolist())
         logger.info(f"Fetched {len(tickers)} S&P 500 tickers from Wikipedia")
         return tickers
     except Exception as e:
@@ -117,12 +118,16 @@ def _get_sp500_tickers() -> list[str]:
 
 def _get_nasdaq100_tickers() -> list[str]:
     try:
-        table = _fetch_wikipedia_table(
+        tables = _fetch_wikipedia_table(
             "https://en.wikipedia.org/wiki/Nasdaq-100"
-        )[4]
-        tickers = sorted(table["Ticker"].tolist())
-        logger.info(f"Fetched {len(tickers)} NASDAQ-100 tickers from Wikipedia")
-        return tickers
+        )
+        # The constituent table index sometimes shifts (was 4, now 5).
+        for t in tables:
+            if "Ticker" in t.columns and t.shape[0] > 50:
+                tickers = sorted(t["Ticker"].tolist())
+                logger.info(f"Fetched {len(tickers)} NASDAQ-100 tickers from Wikipedia")
+                return tickers
+        raise KeyError("No ticker table found")
     except Exception as e:
         logger.warning(f"Failed to fetch NASDAQ-100 tickers: {e}")
         raise RuntimeError(
@@ -390,12 +395,15 @@ def _apply_filters(
         regime = getattr(orig, "regime", None)
         current_regime = getattr(regime, "current_regime", None)
         has_breaks = getattr(regime, "structural_break", False) if regime else False
+        num_trades = getattr(bt, "num_trades", 0)
 
         if sharpe < min_sharpe:
             continue
         if ret < min_return_pct:
             continue
         if dd < max_drawdown_pct:
+            continue
+        if num_trades < 1:
             continue
         if require_mean_reverting:
             rs = str(current_regime).lower()
@@ -443,7 +451,7 @@ def _format_results(
             "max_drawdown_pct": round(dd, 2),
             "win_rate_pct": round(win_rate, 1),
             "num_trades": num_trades,
-            "regime": str(regime) if regime else "unknown",
+            "regime": regime.value if regime else "unknown",
             "structural_breaks": has_breaks,
             "confidence": rp.confidence,
             "risk": rp.risk,
@@ -460,7 +468,7 @@ def _print_results(output: list[dict[str, Any]]) -> None:
 
     header = (
         f"{'Rank':<5} {'Pair':<20} {'Score':<7} {'Sharpe':<8} "
-        f"{'Ret%':<8} {'DD%':<8} {'WF-Shrp':<8} {'Regime':<18} {'Breaks':<7} {'Conf':<6}"
+        f"{'Ret%':<8} {'DD%':<8} {'WF-Shrp':<8} {'Regime':<16} {'Breaks':<7} {'Conf':<6}"
     )
     sep = "-" * len(header)
 
@@ -472,7 +480,7 @@ def _print_results(output: list[dict[str, Any]]) -> None:
         print(
             f"{r['rank']:<5} {r['pair']:<20} {r['composite_score']:<7.4f} "
             f"{r['sharpe_ratio']:<8.2f} {r['return_pct']:<8.1f} {r['max_drawdown_pct']:<8.1f} "
-            f"{wf_str:<8} {r['regime']:<18} {str(r['structural_breaks']):<7} {r['confidence']:<6}"
+            f"{wf_str:<8} {r['regime']:<16} {str(r['structural_breaks']):<7} {r['confidence']:<6}"
         )
     print()
 

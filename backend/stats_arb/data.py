@@ -56,6 +56,9 @@ class DataManager:
     def fetch(self) -> pd.DataFrame:
         """Download adjusted close prices for all tickers.
 
+        Downloads each ticker individually and outer-joins to prevent yfinance
+        from truncating the date range to the common intersection of all tickers.
+
         Returns a DataFrame with one column per ticker, indexed by date.
         Raises ValueError if insufficient data is available.
         """
@@ -64,20 +67,33 @@ class DataManager:
             f"[{self.start.date()} → {self.end.date()}]"
         )
 
-        data = yf.download(
-            self.tickers,
-            start=self.start,
-            end=self.end,
-            auto_adjust=True,
-            progress=False,
-        )
+        prices: pd.DataFrame | None = None
+        for ticker in self.tickers:
+            try:
+                data = yf.download(
+                    ticker,
+                    start=self.start,
+                    end=self.end,
+                    auto_adjust=True,
+                    progress=False,
+                )
+                if data.empty:
+                    logger.warning(f"No data for {ticker}; skipping")
+                    continue
+                close = data["Close"].squeeze().to_frame(ticker)
+                if prices is None:
+                    prices = close
+                else:
+                    prices = prices.join(close, how="outer")
+            except Exception as e:
+                logger.warning(f"Failed to download {ticker}: {e}")
 
-        if self._is_single_ticker():
-            prices = self._extract_single(data)
-        else:
-            prices = self._extract_multi(data)
+        if prices is None or prices.empty:
+            raise ValueError(f"No data retrieved for any ticker in {self.tickers}")
 
-        prices = prices.ffill().dropna(how="any")
+        prices = prices.ffill()
+        # Drop rows that still have NaN (ticker history doesn't cover full range)
+        prices = prices.dropna(how="any")
         prices.index = pd.to_datetime(prices.index)
 
         if len(prices) < 50:
