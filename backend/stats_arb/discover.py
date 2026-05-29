@@ -80,9 +80,27 @@ def _fetch_preset_tickers(preset: str) -> list[str]:
     raise ValueError(f"Unknown preset: {preset}")
 
 
+def _fetch_wikipedia_table(url: str) -> pd.DataFrame:
+    """Fetch a Wikipedia HTML table using proper headers to avoid 403."""
+    import urllib.request
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+        },
+    )
+    with urllib.request.urlopen(req) as resp:
+        html = resp.read().decode("utf-8")
+    return pd.read_html(html)
+
+
 def _get_sp500_tickers() -> list[str]:
     try:
-        table = pd.read_html(
+        table = _fetch_wikipedia_table(
             "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
         )[0]
         tickers = sorted(table["Symbol"].tolist())
@@ -98,7 +116,9 @@ def _get_sp500_tickers() -> list[str]:
 
 def _get_nasdaq100_tickers() -> list[str]:
     try:
-        table = pd.read_html("https://en.wikipedia.org/wiki/Nasdaq-100")[4]
+        table = _fetch_wikipedia_table(
+            "https://en.wikipedia.org/wiki/Nasdaq-100"
+        )[4]
         tickers = sorted(table["Ticker"].tolist())
         logger.info(f"Fetched {len(tickers)} NASDAQ-100 tickers from Wikipedia")
         return tickers
