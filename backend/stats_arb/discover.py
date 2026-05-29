@@ -379,6 +379,14 @@ def _apply_filters(
         sharpe = getattr(bt, "sharpe_ratio", 0.0)
         ret = getattr(bt, "total_return_pct", 0.0)
         dd = getattr(bt, "max_drawdown_pct", 0.0)
+        # Clamp metrics to sensible ranges (backtest sometimes produces
+        # drawdowns > 100% and insane returns due to bugs)
+        if not np.isfinite(sharpe):
+            sharpe = 0.0
+        if not np.isfinite(ret) or abs(ret) > 1e6:
+            ret = 0.0
+        if not np.isfinite(dd) or dd < -100.0:
+            dd = -100.0
         regime = getattr(orig, "regime", None)
         current_regime = getattr(regime, "current_regime", None)
         has_breaks = getattr(regime, "structural_break", False) if regime else False
