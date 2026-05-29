@@ -49,5 +49,11 @@ ML_N_ITER: int = 100
 # ── Ranking / Multiple Comparison ─────────────────
 MULTIPLE_COMPARISON_METHOD: str = "bh"
 
+# ── Auto-Discovery ────────────────────────────────
+AUTO_DISCOVER_TOP_CANDIDATES: int = 30
+AUTO_DISCOVER_MIN_SHARPE: float = 1.0
+AUTO_DISCOVER_MIN_RETURN_PCT: float = 0.0
+AUTO_DISCOVER_MAX_DRAWDOWN_PCT: float = -50.0
+
 # ── Market Impact ─────────────────────────────────
 DEFAULT_MARKET_IMPACT: float = 0.001

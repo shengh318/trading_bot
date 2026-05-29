@@ -71,7 +71,8 @@ trader/
 │   │   ├── ranking.py     Pair ranking with multiple comparison correction
 │   │   ├── ml_models.py   ML extensions for spread prediction
 │   │   ├── pipeline.py    Full pipeline orchestrator (all phases)
-│   │   ├── cli.py         CLI entry point for analysis + ranking + heatmap
+│   │   ├── cli.py         CLI entry point for analysis + ranking + heatmap + auto-discovery
+│   │   ├── discover.py    Auto-discovery — screens cointegrated pairs, runs full analysis, ranks by score, filters by profitability, outputs table/JSON/Markdown
 │   │   └── visualization.py   Publication-quality plotting
 │   ├── tests/             277 pytest tests (26 files) covering all modules
 │   └── config.py          Settings & env vars (Alpaca keys, DB path)
@@ -420,9 +421,69 @@ The `stats_arb` module can be used independently via the command line:
 
 # JSON output for programmatic consumption
 .venv/bin/python -m backend.stats_arb.cli --pair JPM,GS --json
+
+# Auto-discover profitable pairs from S&P 500 (default)
+.venv/bin/python -m backend.stats_arb.cli --auto-discover
+
+# Auto-discover from NASDAQ-100 (faster)
+.venv/bin/python -m backend.stats_arb.cli --auto-discover nasdaq100
+
+# Auto-discover from custom universe with strict filters + Markdown report
+.venv/bin/python -m backend.stats_arb.cli --auto-discover NVDA,AMD,KO,PEP,JPM,GS,MSFT --min-sharpe 1.5 --require-mean-reverting --output-md pairs_report.md
 ```
 
 Analysis results include: correlation stability, Engle-Granger & Johansen cointegration tests, hedge ratio estimates (OLS/rolling/Kalman), spread stationarity (ADF), half-life mean reversion, Hurst exponent, Ornstein-Uhlenbeck process params, regime detection (Hurst/VIX/CUSUM/Chow/Bai-Perron), purged walk-forward validation, backtest metrics (Sharpe, Sortino, Calmar, drawdown, win rate), and pair ranking with multiple comparison correction (Bonferroni/Benjamini-Hochberg). Plots are saved to `stats_arb_plots/`.
+
+The `--auto-discover` command chains all of this together: it screens an entire universe of stocks (S&P 500, NASDAQ-100, Dow 30, or custom list) for cointegrated pairs, runs the full pipeline on the top candidates, scores them by the composite ranking, then filters by profitability (configurable min Sharpe, return, max drawdown, regime, and structural break constraints). Results are printed as a ranked table and optionally saved as JSON or a Markdown report.
+
+### Automated Pairs Discovery Script
+
+For a streamlined experience, use the dedicated `find_pairs` script — it runs a **3-phase pipeline**:
+
+1. **Phase 1 — Correlation pre-filter**: Downloads all tickers in one call, computes pairwise Pearson correlation on returns, keeps only pairs above `--min-corr` (default 0.5). This avoids the O(n²) yfinance calls that naive approaches require.
+2. **Phase 2 — EG Cointegration**: Tests only the correlated pairs for Engle-Granger cointegration (in parallel via cached parquet).
+3. **Phase 3 — Full pipeline**: Runs the complete pairs analysis (spread modeling, regime detection, walk-forward, backtest, ranking) on the top N candidates, filters by profitability, saves a Markdown report.
+
+```bash
+# Windows (PowerShell)
+.venv\Scripts\python -m backend.find_pairs
+.venv\Scripts\python -m backend.find_pairs nasdaq100
+.venv\Scripts\python -m backend.find_pairs dow30
+.venv\Scripts\python -m backend.find_pairs NVDA,AMD,KO,PEP,JPM,GS,MSFT
+
+# macOS / Linux
+.venv/bin/python -m backend.find_pairs
+.venv/bin/python -m backend.find_pairs nasdaq100
+.venv/bin/python -m backend.find_pairs dow30
+.venv/bin/python -m backend.find_pairs NVDA,AMD,KO,PEP,JPM,GS,MSFT
+```
+
+The report is saved as `pairs_report_<timestamp>.md` by default. Customize with options:
+
+```bash
+# Custom output file + strict filters
+.venv/bin/python -m backend.find_pairs nasdaq100 -o nasdaq_pairs.md --min-sharpe 1.5 --min-return 10 --require-mean-reverting
+
+# Lower correlation threshold to find more candidate pairs
+.venv/bin/python -m backend.find_pairs sp500 --min-corr 0.3 --top-candidates 50
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `universe` | `sp500` | `sp500`, `nasdaq100`, `dow30`, or comma-separated tickers |
+| `-o` / `--output` | `pairs_report_<timestamp>.md` | Output Markdown file path |
+| `--min-corr` | `0.5` | Minimum Pearson correlation (Phase 1 filter) |
+| `--min-sharpe` | `1.0` | Minimum Sharpe ratio filter |
+| `--min-return` | `0.0` | Minimum total return % filter |
+| `--max-drawdown` | `-50.0` | Maximum drawdown % filter |
+| `--top-candidates` | `30` | Number of cointegrated pairs to fully analyze |
+| `--require-mean-reverting` | — | Only keep pairs in mean-reverting regime |
+| `--require-no-breaks` | — | Exclude pairs with structural breaks |
+| `--start` | `2015-01-01` | Start date for analysis |
+| `--capital` | `100000` | Initial capital for backtests |
+| `--json` | — | Also print JSON to stdout |
+
+**Note:** True cointegrated pairs with profitable backtests are rare. The pipeline is intentionally conservative — it uses a strict EG test (p < 0.05), requires minimum correlation, walk-forward validates the relationship, and filters by profitability. Expect most universes to yield 0–10 qualifying pairs. If you get zero results, try lowering `--min-corr`, `--min-sharpe`, or increasing `--top-candidates`.
 
 ## Strategies
 

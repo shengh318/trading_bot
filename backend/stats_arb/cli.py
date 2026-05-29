@@ -19,6 +19,10 @@ import numpy as np
 import pandas as pd
 
 from .config import (
+    AUTO_DISCOVER_MAX_DRAWDOWN_PCT,
+    AUTO_DISCOVER_MIN_RETURN_PCT,
+    AUTO_DISCOVER_MIN_SHARPE,
+    AUTO_DISCOVER_TOP_CANDIDATES,
     DEFAULT_SIGNIFICANCE,
     DEFAULT_Z_ENTRY,
     DEFAULT_WALK_FORWARD_TRAIN,
@@ -26,6 +30,7 @@ from .config import (
 )
 from .data import DataManager
 from .cointegration import CointegrationTester
+from .discover import auto_discover
 from .pipeline import PairAnalyzer, PairAnalysisResult
 from .ranking import PairRanker
 from .visualization import Visualizer
@@ -269,6 +274,25 @@ Examples:
 
     parser.add_argument("--pair", type=str, help="Comma-separated pair (e.g., NVDA,META)")
     parser.add_argument("--pairs-file", type=str, help="JSON file with list of [a, b] pairs")
+    parser.add_argument("--auto-discover", type=str, nargs="?", const="sp500",
+                        help="Auto-discover profitable pairs from a universe: sp500, nasdaq100, dow30, "
+                             "or comma-separated tickers (default: sp500)")
+    parser.add_argument("--universe-file", type=str,
+                        help="File with one ticker per line for auto-discover")
+    parser.add_argument("--top-candidates", type=int, default=AUTO_DISCOVER_TOP_CANDIDATES,
+                        help=f"Number of top cointegrated pairs to fully analyze (default: {AUTO_DISCOVER_TOP_CANDIDATES})")
+    parser.add_argument("--min-sharpe", type=float, default=AUTO_DISCOVER_MIN_SHARPE,
+                        help=f"Minimum Sharpe ratio filter (default: {AUTO_DISCOVER_MIN_SHARPE})")
+    parser.add_argument("--min-return-pct", type=float, default=AUTO_DISCOVER_MIN_RETURN_PCT,
+                        help=f"Minimum total return %% filter (default: {AUTO_DISCOVER_MIN_RETURN_PCT})")
+    parser.add_argument("--max-drawdown-pct", type=float, default=AUTO_DISCOVER_MAX_DRAWDOWN_PCT,
+                        help=f"Maximum drawdown %% filter (default: {AUTO_DISCOVER_MAX_DRAWDOWN_PCT})")
+    parser.add_argument("--require-mean-reverting", action="store_true",
+                        help="Only keep pairs in mean-reverting regime")
+    parser.add_argument("--require-no-breaks", action="store_true",
+                        help="Exclude pairs with structural breaks")
+    parser.add_argument("--output-md", type=str, default=None,
+                        help="Save Markdown report to file")
     parser.add_argument("--start", type=str, default="2015-01-01", help="Start date")
     parser.add_argument("--end", type=str, default=None, help="End date (default=today)")
     parser.add_argument("--significance", type=float, default=DEFAULT_SIGNIFICANCE,
@@ -291,7 +315,7 @@ Examples:
 
     logging.getLogger("stats_arb").setLevel(getattr(logging, args.log_level.upper()))
 
-    if not args.pair and not args.pairs_file and not args.heatmap:
+    if not args.pair and not args.pairs_file and not args.heatmap and not args.auto_discover:
         parser.print_help()
         sys.exit(1)
 
@@ -322,6 +346,27 @@ Examples:
         )
         if args.json:
             print(json.dumps([r.to_dict() for r in results], indent=2))
+        return
+
+    if args.auto_discover:
+        auto_discover(
+            universe=args.auto_discover,
+            universe_file=args.universe_file,
+            start=args.start,
+            end=args.end,
+            significance=args.significance,
+            top_candidates=args.top_candidates,
+            min_sharpe=args.min_sharpe,
+            min_return_pct=args.min_return_pct,
+            max_drawdown_pct=args.max_drawdown_pct,
+            require_mean_reverting=args.require_mean_reverting,
+            require_no_breaks=args.require_no_breaks,
+            parallel=not args.no_parallel,
+            capital=args.capital,
+            output_json=args.json,
+            output_file=args.output_md.replace(".md", ".json") if args.output_md and args.json else None,
+            output_md=args.output_md,
+        )
         return
 
     if args.pair:

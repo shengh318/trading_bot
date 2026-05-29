@@ -17,6 +17,10 @@
 | ML train (basic) | `.venv\Scripts\python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20` | `.venv/bin/python -m backend.ml.train --symbols NVDA,AMD,VOO,SPY,META --years 20` |
 | Stats arb CLI (pair) | `.venv\Scripts\python -m backend.stats_arb.cli --pair KO,PEP` | `.venv/bin/python -m backend.stats_arb.cli --pair KO,PEP` |
 | Stats arb CLI (heatmap) | `.venv\Scripts\python -m backend.stats_arb.cli --heatmap NVDA,AMD,INTC,AAPL,MSFT,GOOGL` | `.venv/bin/python -m backend.stats_arb.cli --heatmap NVDA,AMD,INTC,AAPL,MSFT,GOOGL` |
+| Stats arb CLI (discover) | `.venv\Scripts\python -m backend.stats_arb.cli --auto-discover` | `.venv/bin/python -m backend.stats_arb.cli --auto-discover` |
+| Find pairs (auto) | `.venv\Scripts\python -m backend.find_pairs` | `.venv/bin/python -m backend.find_pairs` |
+| Find pairs (nasdaq100) | `.venv\Scripts\python -m backend.find_pairs nasdaq100` | `.venv/bin/python -m backend.find_pairs nasdaq100` |
+| Find pairs (custom + save) | `.venv\Scripts\python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` | `.venv/bin/python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` |
 
 ## Project Structure
 
@@ -71,7 +75,9 @@ backend/
 │   ├── ml_models.py         SpreadPredictor — RF/GBT/XGB regression for spread prediction
 │   ├── pipeline.py          PairAnalyzer — orchestrates all phases: data→correlation→coint→spread→regime→WF→strategy→backtest→(ML)
 │   ├── cli.py               CLI entry point: --pair, --pairs-file, --heatmap, --rank, --ml, --purged, --json
+│   ├── discover.py          Auto-discovery: screens all pairs via EG cointegration, full pipeline on top candidates, ranks, filters by profitability, outputs table + JSON + Markdown
 │   └── visualization.py     Visualizer — spread/zscore/cumulative/heatmap plots via matplotlib+seaborn
+├── find_pairs.py             Automated pairs discovery wrapper (correlation + cointegration + markdown report)
 ├── tests/                   277 pytest tests (26 files)
 │   ├── test_backtest_engine.py        (12)  — single + multi-symbol, streaming, dividend
 │   ├── test_backtest_metrics.py       (11)  — Sharpe, drawdown, win rate calculations
@@ -169,6 +175,7 @@ frontend/
 - **Pipeline order** (in `pipeline.py`): Data → Correlation → Cointegration (EG + Johansen) → Hedge Ratio (OLS/rolling/Kalman) → Spread (half-life, Hurst, ADF, OU) → Regime (Hurst/VIX/CUSUM/Chow/Bai-Perron) → Walk-Forward (purged) → Strategy (z-score mean reversion) → Backtest → Optional ML
 - **PairRanker** (`ranking.py`): composite score = weighted combination of coint p-value, half-life, spread Sharpe, hedge ratio stability, regime stability; multiple comparison correction via Bonferroni or Benjamini-Hochberg
 - **CLI** (`cli.py`): `--pair A,B`, `--pairs-file file.json --rank --top-n 10`, `--heatmap TICKERS`, `--ml`, `--purged`, `--json`, `--no-plots`, `--no-parallel`, `--capital 100000`
+- **Auto-Discovery** (`discover.py`): `--auto-discover [sp500|nasdaq100|dow30|TICKERS]` — screens all pairs via EG cointegration, runs full pipeline on top candidates, ranks, filters by profitability (Sharpe ≥ 1.0), outputs table + optional JSON/Markdown
 - **API**: `POST /api/pairs/analyze` (with `PairAnalysisRequest`), `POST /api/pairs/rank`, `POST /api/pairs/heatmap`
 
 ### Frontend (`frontend/src/`)
