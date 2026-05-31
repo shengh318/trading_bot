@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   api,
   type StrategyInfo,
@@ -40,19 +40,23 @@ export default function Backtest() {
   const [currentRunId, setCurrentRunId] = useState<number | null>(null);
   const wsRef = useRef<ReturnType<typeof api.createBacktestSocket> | null>(null);
 
-  const markers = trades
-    .filter((t): t is Trade & { side: "buy" | "sell" } => t.side === "buy" || t.side === "sell")
-    .map((t) => ({
-      time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
-      side: t.side,
-      symbol: t.symbol,
-    }));
+  const markers = useMemo(
+    () =>
+      trades
+        .filter((t): t is Trade & { side: "buy" | "sell" } => t.side === "buy" || t.side === "sell")
+        .map((t) => ({
+          time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+          side: t.side,
+          symbol: t.symbol,
+        })),
+    [trades],
+  );
 
-  const toggleSymbol = (sym: string) => {
+  const toggleSymbol = useCallback((sym: string) => {
     setSelectedSymbols((prev) =>
       prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym]
     );
-  };
+  }, []);
 
   useEffect(() => {
     api.getStrategies().then((list) => {
@@ -84,7 +88,7 @@ export default function Backtest() {
     [strategies],
   );
 
-  const addLog = (msg: string) => setLog((prev) => [...prev, msg]);
+  const addLog = useCallback((msg: string) => setLog((prev) => [...prev, msg]), []);
 
   const clearRuns = async () => {
     await api.clearBacktestRuns();
@@ -128,24 +132,26 @@ export default function Backtest() {
     const ws = api.createBacktestSocket();
     wsRef.current = ws;
 
+    addLog("Connecting WebSocket...");
     try {
       await ws.connect({
         onBar: (event) => {
+          if (equityRef.current.length === 0) addLog("First bar received, streaming...");
           const point = {
             time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
             value: event.equity,
           };
-          equityRef.current = [...equityRef.current, point];
-          setEquityPoints(equityRef.current);
+          equityRef.current.push(point);
           for (const trade of event.trades) {
-            tradesRef.current = [...tradesRef.current, trade];
-            setTrades(tradesRef.current);
+            tradesRef.current.push(trade);
+            setTrades([...tradesRef.current]);
             addLog(
               `${trade.side.toUpperCase()} ${Number.isInteger(trade.qty) ? trade.qty : trade.qty.toFixed(4)} ${trade.symbol} @ $${trade.price.toFixed(2)}`,
             );
           }
         },
         onComplete: (event) => {
+          setEquityPoints([...equityRef.current]);
           setMetrics(event.metrics ?? EMPTY_METRICS);
           setRunning(false);
           addLog("Simulation complete!");
@@ -158,6 +164,7 @@ export default function Backtest() {
         },
       });
 
+      addLog("WebSocket connected, sending request...");
       ws.onClose(() => setRunning(false));
 
       ws.send({
@@ -200,17 +207,17 @@ export default function Backtest() {
             time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
             value: event.equity,
           };
-          equityRef.current = [...equityRef.current, point];
-          setEquityPoints(equityRef.current);
+          equityRef.current.push(point);
           for (const trade of event.trades) {
-            tradesRef.current = [...tradesRef.current, trade];
-            setTrades(tradesRef.current);
+            tradesRef.current.push(trade);
+            setTrades([...tradesRef.current]);
             addLog(
               `${trade.side.toUpperCase()} ${Number.isInteger(trade.qty) ? trade.qty : trade.qty.toFixed(4)} ${trade.symbol} @ $${trade.price.toFixed(2)}`,
             );
           }
         },
         onComplete: (event) => {
+          setEquityPoints([...equityRef.current]);
           setMetrics(event.metrics ?? EMPTY_METRICS);
           setRunning(false);
           addLog("Replay complete!");

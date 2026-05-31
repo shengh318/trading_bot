@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { useTheme } from "./theme/ThemeContext";
-import Dashboard from "./pages/Dashboard";
-import Backtest from "./pages/Backtest";
-import Strategies from "./pages/Strategies";
-import Live from "./pages/Live";
-import MlLab from "./pages/MlLab";
-import Correlation from "./pages/Correlation";
-import Pairs from "./pages/Pairs";
 import Clock from "./components/Clock";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Backtest = lazy(() => import("./pages/Backtest"));
+const Strategies = lazy(() => import("./pages/Strategies"));
+const Live = lazy(() => import("./pages/Live"));
+const MlLab = lazy(() => import("./pages/MlLab"));
+const Correlation = lazy(() => import("./pages/Correlation"));
+const Pairs = lazy(() => import("./pages/Pairs"));
 
 type Tab = "dashboard" | "backtest" | "strategies" | "live" | "ml" | "correlation" | "pairs";
 
@@ -64,13 +65,15 @@ export default function App() {
           </button>
         ))}
       </nav>
-      {activeTab === "dashboard" && <Dashboard />}
-      {activeTab === "live" && <Live />}
-      {activeTab === "backtest" && <Backtest />}
-      {activeTab === "strategies" && <Strategies />}
-      {activeTab === "ml" && <MlLab />}
-      {activeTab === "correlation" && <Correlation />}
-      {activeTab === "pairs" && <Pairs />}
+      <Suspense fallback={<div style={{ padding: 40, color: colors.text }}>Loading...</div>}>
+        {activeTab === "dashboard" && <Dashboard />}
+        {activeTab === "live" && <Live />}
+        {activeTab === "backtest" && <Backtest />}
+        {activeTab === "strategies" && <Strategies />}
+        {activeTab === "ml" && <MlLab />}
+        {activeTab === "correlation" && <Correlation />}
+        {activeTab === "pairs" && <Pairs />}
+      </Suspense>
     </div>
   );
 }

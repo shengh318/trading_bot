@@ -204,28 +204,33 @@ export class ApiClient {
     return new LiveSocket(wsUrl);
   }
 
+  private async _fetchText(url: string): Promise<string> {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${res.statusText}${text ? ` — ${text.slice(0, 200)}` : ""}`);
+    }
+    return res.text();
+  }
+
   async getAlpacaAccount(): Promise<AccountSummary> {
-    const res = await fetch(`${this.base}/api/alpaca/account`);
-    if (!res.ok) throw new Error("Alpaca account not available");
-    return res.json();
+    const text = await this._fetchText(`${this.base}/api/alpaca/account`);
+    return JSON.parse(text);
   }
 
   async getAlpacaPositions(): Promise<Position[]> {
-    const res = await fetch(`${this.base}/api/alpaca/positions`);
-    if (!res.ok) throw new Error("Alpaca positions not available");
-    return res.json();
+    const text = await this._fetchText(`${this.base}/api/alpaca/positions`);
+    return JSON.parse(text);
   }
 
   async getAlpacaOrders(limit = 25): Promise<Order[]> {
-    const res = await fetch(`${this.base}/api/alpaca/orders?limit=${limit}`);
-    if (!res.ok) throw new Error("Alpaca orders not available");
-    return res.json();
+    const text = await this._fetchText(`${this.base}/api/alpaca/orders?limit=${limit}`);
+    return JSON.parse(text);
   }
 
   async getAlpacaPortfolioHistory(period = "1M", timeframe = "1D"): Promise<{ timestamp: number; equity: number }[]> {
-    const res = await fetch(`${this.base}/api/alpaca/portfolio-history?period=${period}&timeframe=${timeframe}`);
-    if (!res.ok) throw new Error("Alpaca portfolio history not available");
-    return res.json();
+    const text = await this._fetchText(`${this.base}/api/alpaca/portfolio-history?period=${period}&timeframe=${timeframe}`);
+    return JSON.parse(text);
   }
 
   async getMlModels(): Promise<MlModelInfo[]> {

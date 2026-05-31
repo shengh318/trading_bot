@@ -1,17 +1,18 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from backend.api.websocket import _parse_timeframe
-from backend.engine.live import LiveEngine, set_live_engine, get_live_engine
-from backend.strategies.base import Signal
+# LiveEngine and helpers are lazy-imported inside the handler
 
 live_ws_router = APIRouter()
 
 
 @live_ws_router.websocket("/ws/live")
 async def live_websocket(websocket: WebSocket):
+    from backend.engine.live import LiveEngine, set_live_engine, get_live_engine
     await websocket.accept()
     engine: LiveEngine | None = None
 

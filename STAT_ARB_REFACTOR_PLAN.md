@@ -1,16 +1,18 @@
-# Statistical Arbitrage Framework — Refactoring Plan
+# Statistical Arbitrage Framework — Refactoring Plan (✅ COMPLETED)
 
-## Context
+> **Status: All 8 phases implemented.** The framework has grown from 14 modules to 17 (including `__init__.py`), with all fixes applied.
 
-This plan addresses research-validity issues in the existing `backend/stats_arb/` package. The framework (~3,700 lines across 14 modules) already covers the full pipeline — correlation, cointegration, spread analysis, regime detection, walk-forward validation, strategy, backtest, ranking, ML, visualization, and CLI. However, several critical issues compromise out-of-sample validity:
+## Context (Original Issues — All Resolved)
 
-1. **Walk-forward leak**: `coint()` re-estimates hedge ratio on test data
-2. **Decoupled backtest**: Strategy uses full-sample HR, not walk-forward folds
-3. **No structural break detection**: Framework can't detect when pair relationships break
-4. **Correlation metrics are misleading**: `regime_changes` counts zero-crossings (always 0), drift uses only two halves
-5. **Duplicate hedge ratio code**: Same OLS in 3 files, will diverge
-6. **No multiple comparison correction**: 10 pairs × p=0.05 → ~0.5 false positives expected
-7. **Z-score lookahead bias**: `strategy.py` uses full-sample mean/std
+This plan addressed research-validity issues in the existing `backend/stats_arb/` package. The framework (~3,700 lines across 14 modules) covers the full pipeline — correlation, cointegration, spread analysis, regime detection, walk-forward validation, strategy, backtest, ranking, ML, visualization, and CLI. The following critical issues were identified and fixed:
+
+1. ✅ ~~**Walk-forward leak**~~: `coint()` re-estimates hedge ratio on test data → **Fixed with ADF on OOS spread, frozen HR**
+2. ✅ ~~**Decoupled backtest**~~: Strategy uses full-sample HR, not walk-forward folds → **Fixed with WalkForwardBacktest class**
+3. ✅ ~~**No structural break detection**~~: Framework can't detect when pair relationships break → **Fixed with CUSUM/Chow/Bai-Perron**
+4. ✅ ~~**Correlation metrics are misleading**~~: `regime_changes` counts zero-crossings (always 0), drift uses only two halves → **Fixed with threshold_crossings, overall_slope, stability_score**
+5. ✅ ~~**Duplicate hedge ratio code**~~: Same OLS in 3 files, will diverge → **Fixed with centralized `estimate_ols()`**
+6. ✅ ~~**No multiple comparison correction**~~: 10 pairs × p=0.05 → ~0.5 false positives expected → **Fixed with Bonferroni + Benjamini-Hochberg**
+7. ✅ ~~**Z-score lookahead bias**~~: `strategy.py` uses full-sample mean/std → **Fixed with expanding window z-score**
 
 ## What is NOT affected
 
@@ -24,13 +26,13 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 0 — Consolidation
+## ✅ Phase 0 — Consolidation (Implemented)
 
 ### 0.A Delete legacy duplicate
-- **File**: `backend/pairs_trading.py` — delete entirely
+- **File**: `backend/pairs_trading.py` — deleted entirely
 - **Rationale**: All 1,759 lines are superseded by `stats_arb/` modules. The API already imports from `stats_arb`, so this is dead code that will diverge.
 
-### 0.B Centralize hedge ratio estimation (Fix #6)
+### 0.B Centralize hedge ratio estimation (Fix #6) ✅
 - **File**: `backend/stats_arb/hedge_ratio.py`
   - Add standalone function:
     ```python
@@ -50,9 +52,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 1 — Walk-Forward OOS Leakage (Fix #1)
+## ✅ Phase 1 — Walk-Forward OOS Leakage (Fix #1) (Implemented)
 
-### 1.A Replace EG on test data with ADF on OOS spread
+### 1.A Replace EG on test data with ADF on OOS spread ✅
 - **File**: `backend/stats_arb/walk_forward.py`
   - **Line 211**: Replace:
     ```python
@@ -90,9 +92,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 2 — Walk-Forward Backtest (Fix #2)
+## ✅ Phase 2 — Walk-Forward Backtest (Fix #2) (Implemented)
 
-### 2.A New walk-forward backtest classes
+### 2.A New walk-forward backtest classes ✅
 - **File**: `backend/stats_arb/walk_forward.py` — add:
   ```python
   @dataclass
@@ -193,9 +195,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 3 — Structural Break Detection (Fix #3)
+## ✅ Phase 3 — Structural Break Detection (Fix #3) (Implemented)
 
-### 3.A CUSUM test
+### 3.A CUSUM test ✅
 - **File**: `backend/stats_arb/regime.py` — add:
   ```python
   def _detect_cusum_break(
@@ -310,9 +312,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 4 — Correlation Improvements (Fixes #4 & #5)
+## ✅ Phase 4 — Correlation Improvements (Fixes #4 & #5) (Implemented)
 
-### 4.A Threshold crossing detection
+### 4.A Threshold crossing detection ✅
 - **File**: `backend/stats_arb/correlation.py`
   - Replace `regime_changes: int` field with:
     ```python
@@ -401,9 +403,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 5 — Multiple Comparison Correction (Fix #7)
+## ✅ Phase 5 — Multiple Comparison Correction (Fix #7) (Implemented)
 
-### 5.A Correction functions
+### 5.A Correction functions ✅
 - **File**: `backend/stats_arb/ranking.py` — add:
   ```python
   def bonferroni_correct(p_values: list[float], n_tests: int) -> list[float]:
@@ -474,9 +476,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 6 — Research Validity (Fix #8)
+## ✅ Phase 6 — Research Validity (Fix #8) (Implemented)
 
-### 6.A Z-score lookahead fix
+### 6.A Z-score lookahead fix ✅
 - **File**: `backend/stats_arb/strategy.py` (lines 187-190)
   - **Current** (lookahead bias — uses full sample):
     ```python
@@ -540,9 +542,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 7 — Tests
+## ✅ Phase 7 — Tests (Implemented)
 
-### 7.A New test file
+### 7.A New test files ✅
 - **File**: `backend/tests/test_stats_arb.py`
 
 | # | Test Name | What it Verifies | Category |
@@ -577,9 +579,9 @@ Your model training continues uninterrupted.
 
 ---
 
-## Phase 8 — API & Frontend Updates
+## ✅ Phase 8 — API & Frontend Updates (Implemented)
 
-### 8.A Pydantic model updates
+### 8.A Pydantic model updates ✅
 - **File**: `backend/api/models.py`
   - `CorrelationMetrics`:
     ```python
@@ -666,53 +668,36 @@ Your model training continues uninterrupted.
 
 ---
 
-## Dependencies Between Phases
+## Dependencies Between Phases (All Complete)
 
 ```
-Phase 0 (consolidation)
-  ├─→ Phase 1 (WF leakage fix) — imports from centralized hedge_ratio
-  ├─→ Phase 2 (WF backtest) — uses Phase 0 imports
-  └─→ Phase 3 (breaks) — independent
-  │
-Phase 1 ──→ Phase 2 (uses fixed WalkForward folds)
-  │
-Phase 4 (correlation) ── independent, can parallel with Phase 3
-  │
-Phase 5 (multi comp) ──→ Phase 6 (ranking uses adjusted p-values)
-  │
-Phase 3 (breaks) ──→ Phase 6 (ranking penalizes breaks)
-  │
-Phase 6 (validity)
-  │
-Phase 7 (tests) ── needs everything else done first
-  │
-Phase 8 (API/frontend) ── needs everything else done first
+Phase 0 ✅ → Phase 1 ✅ → Phase 2 ✅ → (Phase 3 ∥ 4 ∥ 5) ✅ → Phase 6 ✅ → Phase 7 ✅ → Phase 8 ✅
 ```
 
-**Recommended implementation order**: 0 → 1 → 2 → (3 ∥ 4 ∥ 5) → 6 → 7 → 8
+**Implementation followed order**: 0 → 1 → 2 → (3 ∥ 4 ∥ 5) → 6 → 7 → 8
 
 ---
 
-## File Change Summary
+## File Change Summary (All Implemented ✅)
 
-| File | Change |
-|---|---|
-| `backend/pairs_trading.py` | DELETE |
-| `backend/stats_arb/hedge_ratio.py` | Add `estimate_ols()` with robust/no-intercept modes |
-| `backend/stats_arb/cointegration.py` | Remove inline `_estimate_hedge_ratio`, import from `hedge_ratio` |
-| `backend/stats_arb/walk_forward.py` | Fix EG→ADF (Fix #1), add `WalkForwardBacktest` (Fix #2), centralize HR import (Fix #6) |
-| `backend/stats_arb/correlation.py` | Threshold crossing, slope, drawdown, stability (Fixes #4 & #5) |
-| `backend/stats_arb/regime.py` | CUSUM, Chow, Bai-Perron (Fix #3) |
-| `backend/stats_arb/spread.py` | Variance explosion events (Fix #3) |
-| `backend/stats_arb/strategy.py` | Expanding window z-score (Fix #8), structural break exit (Fix #3) |
-| `backend/stats_arb/backtest.py` | Benchmark comparison (Fix #8) |
-| `backend/stats_arb/ranking.py` | FDR correction (Fix #7), break penalty (Fix #3), stability scoring (Fix #4) |
-| `backend/stats_arb/pipeline.py` | WF backtest (Fix #2), purity assertions (Fix #8) |
-| `backend/stats_arb/visualization.py` | Break plots, HR drift plot, OOS p-value chart (Fixes #3, #6) |
-| `backend/stats_arb/config.py` | New config parameters for breaks, correction, costs |
-| `backend/stats_arb/__init__.py` | New exports |
-| `backend/api/models.py` | Updated/split models for new metrics |
-| `backend/api/pairs_routes.py` | Updated response mapping |
-| `backend/tests/test_stats_arb.py` | NEW — 16 tests covering all fixes |
-| `frontend/src/pages/Pairs.tsx` | UI updates for new metrics |
-| `frontend/src/api/client.ts` | Type updates |
+| File | Change | Status |
+|---|---|---|
+| `backend/pairs_trading.py` | DELETE | ✅ Deleted |
+| `backend/stats_arb/hedge_ratio.py` | Add `estimate_ols()` with robust/no-intercept modes | ✅ Done |
+| `backend/stats_arb/cointegration.py` | Remove inline `_estimate_hedge_ratio`, import from `hedge_ratio` | ✅ Done |
+| `backend/stats_arb/walk_forward.py` | Fix EG→ADF (Fix #1), add `WalkForwardBacktest` (Fix #2), centralize HR import (Fix #6) | ✅ Done |
+| `backend/stats_arb/correlation.py` | Threshold crossing, slope, drawdown, stability (Fixes #4 & #5) | ✅ Done |
+| `backend/stats_arb/regime.py` | CUSUM, Chow, Bai-Perron (Fix #3) | ✅ Done |
+| `backend/stats_arb/spread.py` | Variance explosion events (Fix #3) | ✅ Done |
+| `backend/stats_arb/strategy.py` | Expanding window z-score (Fix #8), structural break exit (Fix #3) | ✅ Done |
+| `backend/stats_arb/backtest.py` | Benchmark comparison (Fix #8) | ✅ Done |
+| `backend/stats_arb/ranking.py` | FDR correction (Fix #7), break penalty (Fix #3), stability scoring (Fix #4) | ✅ Done |
+| `backend/stats_arb/pipeline.py` | WF backtest (Fix #2), purity assertions (Fix #8) | ✅ Done |
+| `backend/stats_arb/visualization.py` | Break plots, HR drift plot, OOS p-value chart (Fixes #3, #6) | ✅ Done |
+| `backend/stats_arb/config.py` | New config parameters for breaks, correction, costs | ✅ Done |
+| `backend/stats_arb/__init__.py` | New exports | ✅ Done |
+| `backend/api/models.py` | Updated/split models for new metrics | ✅ Done |
+| `backend/api/pairs_routes.py` | Updated response mapping | ✅ Done |
+| `backend/tests/test_stats_arb.py` | NEW — 16 tests covering all fixes | ✅ Done (plus additional numerical test files) |
+| `frontend/src/pages/Pairs.tsx` | UI updates for new metrics | ✅ Done |
+| `frontend/src/api/client.ts` | Type updates | ✅ Done |

@@ -20,6 +20,8 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+
+from backend.cpp_ext import compute_time_to_mean, rolling_half_life
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, mean_absolute_error, r2_score, roc_auc_score
 from sklearn.model_selection import train_test_split
@@ -409,42 +411,15 @@ class SpreadPredictor:
 
     @staticmethod
     def _compute_time_to_mean(zscore: pd.Series, max_horizon: int = 60) -> pd.Series:
-        """Compute days until z-score crosses 0."""
-        result = pd.Series(max_horizon, index=zscore.index)
-        for i in range(len(zscore)):
-            for j in range(1, max_horizon + 1):
-                if i + j < len(zscore):
-                    if zscore.iloc[i] * zscore.iloc[i + j] <= 0:
-                        result.iloc[i] = j
-                        break
-        return result
+        """Compute days until z-score crosses 0 — C++ accelerated."""
+        result = compute_time_to_mean(zscore.values.astype(float), max_horizon)
+        return pd.Series(result, index=zscore.index)
 
     @staticmethod
     def _estimate_half_life_series(spread: pd.Series) -> pd.Series:
-        """Estimate rolling half-life."""
-        import math
-        result = pd.Series(float("inf"), index=spread.index)
-        for i in range(63, len(spread) + 1):
-            chunk = spread.iloc[i - 63 : i].values
-            if len(chunk) < 10:
-                continue
-            s = pd.Series(chunk)
-            lagged = s.shift(1).dropna().values
-            delta = s.diff().dropna().values
-            if len(lagged) < 5:
-                continue
-            lagged_const = np.column_stack([np.ones_like(lagged), lagged])
-            try:
-                theta, _, _, _ = np.linalg.lstsq(lagged_const, delta, rcond=None)
-            except np.linalg.LinAlgError:
-                continue
-            theta_val = theta[1]
-            if theta_val >= 0:
-                continue
-            hl = -math.log(2) / theta_val
-            if np.isfinite(hl):
-                result.iloc[i - 1] = hl
-        return result
+        """Estimate rolling half-life — C++ accelerated."""
+        vals = rolling_half_life(spread.values.astype(float), 63)
+        return pd.Series(vals, index=spread.index)
 
     def _empty_result(self) -> MLResult:
         return MLResult(

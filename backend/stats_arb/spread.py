@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+
+from backend.cpp_ext import hurst_exponent, estimate_ols as cpp_estimate_ols, adf_test
 import pandas as pd
 from scipy import stats
-from statsmodels.tsa.stattools import adfuller, acf
+from statsmodels.tsa.stattools import acf
 
 logger = logging.getLogger("stats_arb.spread")
 
@@ -139,8 +141,7 @@ class SpreadAnalyzer:
             is_stationary = False
         else:
             maxlag = min(1, len(spread) // 4)
-            adf_full = adfuller(spread.values, maxlag=maxlag, autolag="AIC")
-            adf_stat, adf_p = float(adf_full[0]), float(adf_full[1])
+            adf_stat, adf_p = adf_test(spread.values, maxlag=maxlag, autolag=True)
             is_stationary = bool(adf_p < 0.05)
 
         speed = self._ou_mean_reversion_speed(spread.values)
@@ -199,7 +200,7 @@ class SpreadAnalyzer:
 
     @staticmethod
     def _estimate_half_life(spread: np.ndarray) -> float:
-        """Estimate half-life of mean reversion via OLS on lagged spread.
+        """Estimate half-life of mean reversion via OLS on lagged spread — C++ accelerated.
 
         Regress Δspreadₜ = α + θ * spreadₜ₋₁ + εₜ.
         Half-life = -ln(2) / θ  (θ < 0 → mean reversion).
@@ -207,20 +208,13 @@ class SpreadAnalyzer:
         if len(spread) < 10:
             return float("inf")
 
-        spread_series = pd.Series(spread)
-        lagged = spread_series.shift(1).dropna().values
-        delta = spread_series.diff().dropna().values
-
-        if len(lagged) < 5:
+        lagged = spread[:-1]
+        delta = spread[1:] - spread[:-1]
+        mask = np.isfinite(lagged) & np.isfinite(delta)
+        if mask.sum() < 5:
             return float("inf")
 
-        lagged_with_const = np.column_stack([np.ones_like(lagged), lagged])
-        try:
-            theta, _, _, _ = np.linalg.lstsq(lagged_with_const, delta, rcond=None)
-        except np.linalg.LinAlgError:
-            return float("inf")
-
-        theta_val = theta[1]
+        theta_val = cpp_estimate_ols(delta[mask], lagged[mask], add_const=True)
         if theta_val >= 0:
             return float("inf")
 
@@ -229,67 +223,24 @@ class SpreadAnalyzer:
 
     @staticmethod
     def _hurst_exponent(ts: np.ndarray) -> float:
-        """Compute Hurst exponent via rescaled range (R/S) analysis.
-
-        H < 0.5 → mean-reverting (anti-persistent).
-        H = 0.5 → random walk.
-        H > 0.5 → trending (persistent).
-        """
-        if len(ts) < 20:
-            return 0.5
-        if np.nanmin(ts) == np.nanmax(ts):
-            return 0.5
-
-        ts = np.asarray(ts)
-        max_lag = len(ts) // 2
-        if max_lag < 3:
-            return 0.5
-        lags = range(2, max_lag)
-        tau: list[float] = []
-        for lag in lags:
-            chunks = len(ts) // lag
-            if chunks < 1:
-                continue
-            trimmed = ts[: chunks * lag]
-            reshaped = trimmed.reshape((chunks, lag))
-            mean_adj = reshaped - reshaped.mean(axis=1, keepdims=True)
-            cumsum = mean_adj.cumsum(axis=1)
-            std_vals = reshaped.std(axis=1, ddof=0)
-            std_vals = np.where(std_vals > 0, std_vals, np.nan)
-            rs = (cumsum.max(axis=1) - cumsum.min(axis=1)) / std_vals
-            rs = rs[~np.isnan(rs)]
-            if len(rs) > 0:
-                tau.append(float(rs.mean()))
-
-        if len(tau) < 3:
-            return 0.5
-
-        lags_used = list(lags[: len(tau)])
-        if len(lags_used) < 3:
-            return 0.5
-
-        reg = np.polyfit(np.log(lags_used), np.log(tau), 1)
-        h = float(reg[0])
-        return max(0.0, min(1.0, h))
+        """Compute Hurst exponent via rescaled range (R/S) analysis — C++ accelerated."""
+        return hurst_exponent(ts)
 
     @staticmethod
     def _ou_mean_reversion_speed(spread: np.ndarray) -> float:
-        """Estimate OU mean reversion speed θ.
+        """Estimate OU mean reversion speed θ — C++ accelerated.
 
         Fits Δspreadₜ = θ * (μ - spreadₜ₋₁) * Δt + σ * εₜ.
         Returns θ (negative = mean-reverting).
         """
         if len(spread) < 10:
             return 0.0
-        s = pd.Series(spread)
-        lagged = s.shift(1).dropna().values
-        delta = s.diff().dropna().values
-        lagged_const = np.column_stack([np.ones_like(lagged), lagged])
-        try:
-            coeffs, _, _, _ = np.linalg.lstsq(lagged_const, delta, rcond=None)
-        except np.linalg.LinAlgError:
+        lagged = spread[:-1]
+        delta = spread[1:] - spread[:-1]
+        mask = np.isfinite(lagged) & np.isfinite(delta)
+        if mask.sum() < 2:
             return 0.0
-        return float(coeffs[1])
+        return cpp_estimate_ols(delta[mask], lagged[mask], add_const=True)
 
     @staticmethod
     def _expected_time_to_mean(current_z: float, speed: float) -> float:

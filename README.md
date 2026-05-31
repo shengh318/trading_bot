@@ -39,7 +39,8 @@ trader/
 │   │   ├── registry.py    Strategy registry (discovery + instantiation)
 │   │   ├── sma_crossover.py    SMA crossover strategy
 │   │   ├── simple_strat_1.py   Mean-reversion DCA strategy
-│   │   └── ml_strategy.py      ML-based strategy (loads trained model)
+│   │   ├── ml_strategy.py      ML-based strategy (loads trained model)
+│   │   └── corr_coint_strat.py Correlation + cointegration pairs strategy
 │   ├── ml/                ML training pipeline
 │   │   ├── features.py    38 technical indicator features + cross-symbol merging
 │   │   ├── model.py       Versioned joblib save/load + metadata + list/delete
@@ -74,7 +75,7 @@ trader/
 │   │   ├── cli.py         CLI entry point for analysis + ranking + heatmap + auto-discovery
 │   │   ├── discover.py    Auto-discovery — screens cointegrated pairs, runs full analysis, ranks by score, filters by profitability, outputs table/JSON/Markdown
 │   │   └── visualization.py   Publication-quality plotting
-│   ├── tests/             277 pytest tests (26 files) covering all modules
+│   ├── tests/             742 pytest tests (50 files) covering all modules
 │   └── config.py          Settings & env vars (Alpaca keys, DB path)
 ├── frontend/
 │   └── src/
@@ -156,7 +157,7 @@ Open http://localhost:5173 in your browser.
 
 ## Testing
 
-### Backend (277 tests)
+### Backend (742 tests)
 
 ```bash
 # Windows
@@ -166,7 +167,7 @@ Open http://localhost:5173 in your browser.
 .venv/bin/python -m pytest backend/tests/ -v --tb=short
 ```
 
-### Frontend (79 tests)
+### Frontend (133 tests)
 
 ```bash
 cd frontend; npm test
@@ -492,13 +493,14 @@ The report is saved as `pairs_report_<timestamp>.md` by default. Customize with 
 | **SmaCrossover** | Rule-based | Buy when short SMA crosses above long SMA, sell on cross below |
 | **Simple Strat 1** | Rule-based | Mean reversion with DCA — buys on drops from open, sells on green days with stop loss |
 | **ML Strategy** | ML-based | Loads a trained model (RF/GBT/XGB/LGB/SGD/MLP/stacking) and generates signals from 38 technical indicator features with confidence-based position sizing, optional exit management, online learning (SGD partial_fit), and inference-time context feature merging |
+| **CorrCointStrategy** | Pairs | Correlation + cointegration mean-reversion pairs strategy — enters when spread z-score exceeds threshold, exits on reversion, with cooldown, correlation gate, and configurable stop-loss |
 
 ## Build Progress
 
 - [x] Phase 1: Foundation — SQLite schema, Alpaca data loader, config
 - [x] Phase 2: Custom Backtest Engine — bar-by-bar simulation, P&L tracking, equity curves, metrics
 - [x] Phase 3: Backend API + WebSocket — REST endpoints, WebSocket streaming, strategy registry
-- [x] Phase 4: React Frontend Dashboard — 7 pages, 6 widgets, WebSocket streaming, buy/sell markers, theme toggle, 79 frontend tests
+- [x] Phase 4: React Frontend Dashboard — 7 pages, 6 widgets, WebSocket streaming, buy/sell markers, theme toggle, 133 frontend tests
 - [x] Phase 5: Live Trading Engine — Alpaca live execution, market-open detection, WebSocket streaming, Live UI page
 - [x] Phase 6: ML Training Pipeline — yfinance data download, 38 technical indicator features, RF/GBT training, grid search, baseline comparison, confidence-based position sizing
 - [x] Phase 7: Advanced ML — SGD/MLP model types, stacking ensemble, multi-horizon ensemble, regime-aware modulation, cross-symbol context features, versioned model storage, on-demand retraining API, ML Lab UI, online learning (partial_fit), auto-optimizer with forward selection

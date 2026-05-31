@@ -75,7 +75,7 @@ def _mock_yf_download(symbols, start, end, auto_adjust, progress):
 
 class TestCorrelationEndpoint:
     def test_returns_valid_response_structure(self, api_db):
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?symbol_a=NVDA&symbol_b=SPY&years=1&windows=20,60")
         assert resp.status_code == 200
         data = resp.json()
@@ -107,19 +107,19 @@ class TestCorrelationEndpoint:
             assert key in stats, f"Missing statistic: {key}"
 
     def test_multiple_windows_returned(self, api_db):
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?windows=10,30,90")
         data = resp.json()
         assert set(data["correlations"].keys()) == {"10", "30", "90"}
 
     def test_single_window(self, api_db):
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?windows=50")
         data = resp.json()
         assert list(data["correlations"].keys()) == ["50"]
 
     def test_statistics_are_reasonable_values(self, api_db):
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?symbol_a=NVDA&symbol_b=SPY&years=2")
         stats = resp.json()["statistics"]
         assert -1.0 <= stats["pearson_r"] <= 1.0
@@ -132,7 +132,7 @@ class TestCorrelationEndpoint:
     def test_returns_502_on_empty_data(self, api_db):
         def empty_download(*args, **kwargs):
             return pd.DataFrame()
-        with patch("backend.api.ml_routes.yf.download", empty_download):
+        with patch("yfinance.download", empty_download):
             resp = client.get("/api/correlation/data")
         assert resp.status_code == 502
         assert "No data" in resp.json()["detail"]
@@ -140,7 +140,7 @@ class TestCorrelationEndpoint:
     def test_returns_502_when_close_column_missing(self, api_db):
         def bad_download(*args, **kwargs):
             return pd.DataFrame({"Open": [1.0]})
-        with patch("backend.api.ml_routes.yf.download", bad_download):
+        with patch("yfinance.download", bad_download):
             resp = client.get("/api/correlation/data")
         assert resp.status_code == 502
 
@@ -148,7 +148,7 @@ class TestCorrelationEndpoint:
         dates = pd.date_range("2025-01-01", periods=10, freq="D")
         midx = pd.MultiIndex.from_product([["Close"], ["SPY"]])
         df = pd.DataFrame(np.random.randn(10), index=dates, columns=midx)
-        with patch("backend.api.ml_routes.yf.download", return_value=df):
+        with patch("yfinance.download", return_value=df):
             resp = client.get("/api/correlation/data?symbol_a=NVDA&symbol_b=SPY")
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"].lower()
@@ -162,14 +162,14 @@ class TestCorrelationEndpoint:
             index=dates,
             columns=midx,
         )
-        with patch("backend.api.ml_routes.yf.download", return_value=df):
+        with patch("yfinance.download", return_value=df):
             resp = client.get("/api/correlation/data?symbol_a=A&symbol_b=B&years=1")
         assert resp.status_code == 422
         assert "Not enough data" in resp.json()["detail"]
 
     def test_correlation_value_range(self, api_db):
         """Each correlation point should be between -1 and 1."""
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?windows=20")
         data = resp.json()
         for pts in data["correlations"].values():
@@ -179,7 +179,7 @@ class TestCorrelationEndpoint:
                 )
 
     def test_oos_corr_drop_is_non_negative(self, api_db):
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?years=3")
         stats = resp.json()["statistics"]
         assert stats["oos_corr_drop"] >= 0.0
@@ -197,7 +197,7 @@ class TestCorrelationEndpoint:
             )
             df.index.name = "Date"
             return df
-        with patch("backend.api.ml_routes.yf.download", identical_download):
+        with patch("yfinance.download", identical_download):
             resp = client.get("/api/correlation/data?symbol_a=A&symbol_b=B&years=1")
         pearson_r = resp.json()["statistics"]["pearson_r"]
         assert abs(pearson_r - 1.0) < 1e-4, f"Expected ~1.0, got {pearson_r}"
@@ -218,14 +218,14 @@ class TestCorrelationEndpoint:
             )
             df.index.name = "Date"
             return df
-        with patch("backend.api.ml_routes.yf.download", inverse_download):
+        with patch("yfinance.download", inverse_download):
             resp = client.get("/api/correlation/data?symbol_a=A&symbol_b=B&years=1")
         pearson_r = resp.json()["statistics"]["pearson_r"]
         assert pearson_r < -0.99, f"Expected ≈ -1.0, got {pearson_r}"
 
     def test_default_parameters(self, api_db):
         """Defaults should be NVDA, SPY, 5 years, windows=20,60,120."""
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data")
         assert resp.status_code == 200
         data = resp.json()
@@ -234,7 +234,7 @@ class TestCorrelationEndpoint:
         assert set(data["correlations"].keys()) == {"20", "60", "120"}
 
     def test_cumulative_returns_begin_at_100(self, api_db):
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data")
         data = resp.json()
         for sym, pts in data["cumulative_returns"].items():
@@ -242,13 +242,13 @@ class TestCorrelationEndpoint:
 
     def test_yfinance_timeout_handling(self, api_db):
         """yfinance returning empty raises 502, not 500."""
-        with patch("backend.api.ml_routes.yf.download", return_value=pd.DataFrame()):
+        with patch("yfinance.download", return_value=pd.DataFrame()):
             resp = client.get("/api/correlation/data")
         assert resp.status_code == 502
 
     def test_response_matches_pydantic_model(self, api_db):
         """Response should deserialize cleanly into CorrelationDataResponse."""
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data")
         model = CorrelationDataResponse(**resp.json())
         assert model.symbol_a == resp.json()["symbol_a"]
@@ -275,7 +275,7 @@ class TestCorrelationEndpoint:
             )
             df.index.name = "Date"
             return df
-        with patch("backend.api.ml_routes.yf.download", late_start_download):
+        with patch("yfinance.download", late_start_download):
             resp = client.get("/api/correlation/data?symbol_a=A&symbol_b=B&years=1")
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         data = resp.json()
@@ -289,7 +289,7 @@ class TestCorrelationEndpoint:
 
     def test_invalid_windows_param_returns_422(self, api_db):
         """Non-numeric windows like 'abc' should return 422, not 500."""
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?windows=abc")
         assert resp.status_code == 422, (
             f"Expected 422 for invalid window, got {resp.status_code}: {resp.text}"
@@ -297,7 +297,7 @@ class TestCorrelationEndpoint:
 
     def test_empty_windows_string_does_not_crash(self, api_db):
         """An empty windows string should not crash the endpoint."""
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?windows=")
         assert resp.status_code == 200
         data = resp.json()
@@ -305,7 +305,7 @@ class TestCorrelationEndpoint:
 
     def test_oos_corr_drop_rounded_consistently(self, api_db):
         """oos_corr_drop should be rounded (like other statistics)."""
-        with patch("backend.api.ml_routes.yf.download", _mock_yf_download):
+        with patch("yfinance.download", _mock_yf_download):
             resp = client.get("/api/correlation/data?years=3")
         stats = resp.json()["statistics"]
         oos_val = stats["oos_corr_drop"]
@@ -328,7 +328,7 @@ class TestCorrelationEndpoint:
             )
             df.index.name = "Date"
             return df
-        with patch("backend.api.ml_routes.yf.download", nan_column_download):
+        with patch("yfinance.download", nan_column_download):
             resp = client.get("/api/correlation/data?symbol_a=A&symbol_b=B&years=1")
         assert resp.status_code == 502, (
             f"Expected 502 for all-NaN column, got {resp.status_code}: {resp.text}"
@@ -346,7 +346,7 @@ class TestCorrelationEndpoint:
             )
             df.index.name = "Date"
             return df
-        with patch("backend.api.ml_routes.yf.download", flat_download):
+        with patch("yfinance.download", flat_download):
             resp = client.get("/api/correlation/data?symbol_a=A&symbol_b=B&years=1")
         assert resp.status_code == 200, (
             f"Expected 200 for constant prices, got {resp.status_code}: {resp.text}"

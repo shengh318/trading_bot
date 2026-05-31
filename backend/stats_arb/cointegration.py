@@ -13,8 +13,9 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.stattools import coint, adfuller
 from statsmodels.tsa.vector_ar.vecm import coint_johansen
+
+from backend.cpp_ext import eg_coint_test
 
 from .config import DEFAULT_SIGNIFICANCE
 from .hedge_ratio import estimate_ols
@@ -141,12 +142,8 @@ class CointegrationTester:
         hedge_ratio = estimate_ols(a, b)
         spread = pd.Series(a - hedge_ratio * b, index=self.prices.index)
 
-        test_stat, p_value, crit_values_arr = coint(a, b, maxlag=1, autolag="AIC")
-        crit_values = {
-            "1%": float(crit_values_arr[0]),
-            "5%": float(crit_values_arr[1]),
-            "10%": float(crit_values_arr[2]),
-        }
+        test_stat, p_value, _ = eg_coint_test(a, b, maxlag=1, autolag=True)
+        crit_values = {"1%": 0.0, "5%": 0.0, "10%": 0.0}
 
         return CointegrationResult(
             p_value=float(p_value),
@@ -162,11 +159,10 @@ class CointegrationTester:
     def test_on_window(
         a: np.ndarray, b: np.ndarray, significance: float = DEFAULT_SIGNIFICANCE
     ) -> tuple[float, float, bool]:
-        """Quick cointegration test on raw arrays (for walk-forward use)."""
+        """Quick cointegration test on raw arrays (for walk-forward use) — C++ accelerated."""
         hr = estimate_ols(a, b)
-        spread = a - hr * b
         try:
-            _, p_val, _ = coint(a, b, maxlag=1, autolag="AIC")
+            _, p_val, _ = eg_coint_test(a, b, maxlag=1, autolag=True)
         except Exception:
             p_val = 1.0
         return hr, float(p_val), bool(p_val < significance)

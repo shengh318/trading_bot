@@ -1,15 +1,12 @@
+import importlib
 from typing import Any, Optional
 
 from backend.strategies.base import Strategy
-from backend.strategies.auto_coint_strategy import AutoCointStrategy
-from backend.strategies.corr_coint_strat import CorrCointStrategy
-from backend.strategies.ml_strategy import MLStrategy
-from backend.strategies.sma_crossover import SmaCrossover
-from backend.strategies.simple_strat_1 import SimpleStrat1
 
+# Strategy metadata — no heavy imports, just descriptions and param definitions.
+# The actual strategy classes are lazy-loaded via _CLASS_LOADER.
 _REGISTRY: dict[str, dict] = {
     "ML Strategy": {
-        "class": MLStrategy,
         "description": "Pre-trained ML model (RF/GBT/XGBoost/LightGBM) loaded from disk. Predicts next-bar direction from 38 technical indicators. Params auto-loaded from model metadata (confidence threshold, Kelly) — override here if needed.",
         "params": [
             {"name": "model_name", "type": "str", "default": "multi_symbol_model"},
@@ -21,7 +18,6 @@ _REGISTRY: dict[str, dict] = {
         ],
     },
     "SmaCrossover": {
-        "class": SmaCrossover,
         "description": "Buy when short SMA crosses above long SMA, sell when it crosses below.",
         "params": [
             {"name": "short_window", "type": "int", "default": 10},
@@ -29,7 +25,6 @@ _REGISTRY: dict[str, dict] = {
         ],
     },
     "Simple Strat 1": {
-        "class": SimpleStrat1,
         "description": "Mean reversion with DCA. Buys fixed $ amount when price drops from the day's open, sells entire position on green days, with stop loss.",
         "params": [
             {"name": "buy_size", "type": "float", "default": 100.0},
@@ -41,7 +36,6 @@ _REGISTRY: dict[str, dict] = {
         ],
     },
     "CorrCointStrategy": {
-        "class": CorrCointStrategy,
         "description": "Pairs mean-reversion trading using correlation + cointegration. Enters long/short spread when z-score deviates, exits on mean reversion, partial profit-taking, stop-loss, or time limit. Supports graduated entry, volatility scaling, P&L stop, half-life weighting, hedge ratio drift rebalancing, and cooldown.",
         "params": [
             {"name": "symbol_b", "type": "str", "default": ""},
@@ -62,8 +56,21 @@ _REGISTRY: dict[str, dict] = {
             {"name": "hedge_ratio_window", "type": "int", "default": 60},
         ],
     },
+    "TSMOM Strategy": {
+        "description": "Time-Series Momentum — trades persistent trends using momentum signals (21d/63d/126d/252d returns) with trend filters (price>MA200, MA50>MA200, breakout), volatility-adjusted position sizing, and optional stop-loss. Supports long-only and long/short modes. For multi-asset portfolio backtesting use TSMOMResearchFramework directly.",
+        "params": [
+            {"name": "momentum_lookback", "type": "int", "default": 126},
+            {"name": "long_only", "type": "bool", "default": True},
+            {"name": "use_trend_filter", "type": "bool", "default": True},
+            {"name": "trend_filter_type", "type": "str", "default": "price_above_ma200"},
+            {"name": "volatility_position_sizing", "type": "bool", "default": False},
+            {"name": "target_volatility", "type": "float", "default": 0.15},
+            {"name": "signal_type", "type": "str", "default": "binary"},
+            {"name": "max_hold_bars", "type": "int", "default": 0},
+            {"name": "stop_loss_pct", "type": "float", "default": 0.0},
+        ],
+    },
     "AutoCointStrategy": {
-        "class": AutoCointStrategy,
         "description": "Auto-discovers the best cointegrated pair from a comma-separated list of symbols. Downloads prices, computes Pearson correlations, runs EG cointegration on top candidates, then trades the best pair using z-score mean reversion with stop-loss and time-based exit. No prior pair discovery needed.",
         "params": [
             {"name": "symbols", "type": "str", "default": "NVDA,AMD"},
@@ -77,6 +84,28 @@ _REGISTRY: dict[str, dict] = {
         ],
     },
 }
+
+# Module paths for lazy-loading strategy classes.
+_CLASS_LOADER: dict[str, str] = {
+    "ML Strategy": "backend.strategies.ml_strategy.MLStrategy",
+    "SmaCrossover": "backend.strategies.sma_crossover.SmaCrossover",
+    "Simple Strat 1": "backend.strategies.simple_strat_1.SimpleStrat1",
+    "CorrCointStrategy": "backend.strategies.corr_coint_strat.CorrCointStrategy",
+    "TSMOM Strategy": "backend.strategies.tsmom_strategy.TSMOMStrategy",
+    "AutoCointStrategy": "backend.strategies.auto_coint_strategy.AutoCointStrategy",
+}
+
+_CLASS_CACHE: dict[str, type[Strategy]] = {}
+
+
+def _resolve_class(name: str) -> type[Strategy]:
+    if name in _CLASS_CACHE:
+        return _CLASS_CACHE[name]
+    mod_path, cls_name = _CLASS_LOADER[name].rsplit(".", 1)
+    module = importlib.import_module(mod_path)
+    cls: type[Strategy] = getattr(module, cls_name)
+    _CLASS_CACHE[name] = cls
+    return cls
 
 
 def list_strategies() -> list[dict]:
@@ -121,4 +150,5 @@ def get_strategy(name: str, params: Optional[dict[str, Any]] = None) -> Strategy
     else:
         resolved_params = {p["name"]: p["default"] for p in info["params"]}
 
-    return info["class"](**resolved_params)
+    cls = _resolve_class(name)
+    return cls(**resolved_params)

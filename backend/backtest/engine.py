@@ -37,17 +37,25 @@ class BacktestEngine:
         self.initial_cash = initial_cash
         self.portfolio = Portfolio(initial_cash)
 
+        self._close_arr = data["close"].values
+        self._timestamps = [str(ts) if not isinstance(ts, str) else ts for ts in data.index]
+
+        self._has_buy_size = hasattr(strategy, "buy_size")
+        self._has_position_fraction = hasattr(strategy, "position_fraction")
+        self._has_sell_portion = hasattr(strategy, "sell_portion")
+
         if dividends is not None and not dividends.empty:
             if "dividend" not in dividends.columns:
                 raise ValueError("dividends DataFrame must have a 'dividend' column")
             self._dividends = dividends
+            self._dividends.index = pd.to_datetime(self._dividends.index)
         else:
             self._dividends = pd.DataFrame()
 
     def _apply_dividend(self, timestamp: str) -> float:
         if self._dividends.empty:
             return 0.0
-        ts = pd.to_datetime(timestamp)
+        ts = pd.Timestamp(timestamp)
         match = self._dividends[self._dividends.index == ts]
         if match.empty:
             return 0.0
@@ -65,19 +73,28 @@ class BacktestEngine:
 
         self.strategy.init(self.data)
 
+        close_arr = self._close_arr
+        timestamps = self._timestamps
+        strat = self.strategy
+        has_buy_size = self._has_buy_size
+        has_pos_frac = self._has_position_fraction
+        has_sell_port = self._has_sell_portion
+
         for i in range(len(self.data)):
-            row = self.data.iloc[i]
-            timestamp = row.name if isinstance(row.name, str) else str(row.name)
-            price = float(row["close"])
+            price = float(close_arr[i])
+            timestamp = timestamps[i]
 
             self._apply_dividend(timestamp)
 
-            signal = self.strategy.next(i, self.data, self.portfolio)
+            signal = strat.next(i, self.data, self.portfolio)
 
             if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
-                strat = self.strategy
-                trade_amt = getattr(strat, "buy_size", None)
-                buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                if has_buy_size:
+                    trade_amt = strat.buy_size
+                    buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                else:
+                    pos_frac = strat.position_fraction if has_pos_frac else 1.0
+                    buy_cash = self.portfolio.cash * min(pos_frac, 1.0)
                 qty = buy_cash / price
                 if qty > 0:
                     cost = qty * price
@@ -89,7 +106,7 @@ class BacktestEngine:
 
                     self.portfolio.cash -= cost
                     self.portfolio.positions[self.symbol] = total_shares
-                    self.strategy.on_trade("buy", self.symbol, qty, price)
+                    strat.on_trade("buy", self.symbol, qty, price)
 
                     trades.append({
                         "bar_index": i,
@@ -102,16 +119,15 @@ class BacktestEngine:
                     })
 
             elif signal in (Signal.SELL, Signal.EXIT) and self.portfolio.positions.get(self.symbol, 0) > 0:
-                strat = self.strategy
                 current_pos = self.portfolio.positions[self.symbol]
                 avg_entry = self.portfolio.avg_entry.get(self.symbol, price)
 
                 if signal == Signal.EXIT:
                     qty = current_pos
                 else:
-                    sell_pct = getattr(strat, "sell_portion", None)
-                    if sell_pct is not None:
-                        qty = current_pos * sell_pct / 100
+                    if has_sell_port:
+                        sell_pct = strat.sell_portion
+                        qty = current_pos * sell_pct / 100 if sell_pct is not None else current_pos
                     else:
                         qty = current_pos
 
@@ -122,9 +138,7 @@ class BacktestEngine:
                     new_pos = current_pos - qty
                     self.portfolio.positions[self.symbol] = new_pos
 
-                    if new_pos > 0:
-                        pass
-                    else:
+                    if new_pos <= 0:
                         self.portfolio.positions[self.symbol] = 0
                         self.portfolio.avg_entry[self.symbol] = 0.0
 
@@ -139,9 +153,7 @@ class BacktestEngine:
                     })
 
             equity = self.portfolio.cash + sum(
-                pos * float(self.data.iloc[i]["close"])
-                for sym, pos in self.portfolio.positions.items()
-                if pos > 0
+                pos * price for pos in self.portfolio.positions.values() if pos > 0
             )
             snapshots.append({
                 "bar_index": i,
@@ -167,10 +179,16 @@ class BacktestEngine:
         self.portfolio = Portfolio(self.initial_cash)
         self.strategy.init(self.data)
 
+        close_arr = self._close_arr
+        timestamps = self._timestamps
+        strat = self.strategy
+        has_buy_size = self._has_buy_size
+        has_pos_frac = self._has_position_fraction
+        has_sell_port = self._has_sell_portion
+
         for i in range(len(self.data)):
-            row = self.data.iloc[i]
-            timestamp = row.name if isinstance(row.name, str) else str(row.name)
-            price = float(row["close"])
+            price = float(close_arr[i])
+            timestamp = timestamps[i]
 
             dividend_amount = self._apply_dividend(timestamp)
             event_dividend = None
@@ -181,13 +199,16 @@ class BacktestEngine:
                     "dividend": dividend_amount,
                 }
 
-            signal = self.strategy.next(i, self.data, self.portfolio)
+            signal = strat.next(i, self.data, self.portfolio)
             event_trade = None
 
             if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
-                strat = self.strategy
-                trade_amt = getattr(strat, "buy_size", None)
-                buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                if has_buy_size:
+                    trade_amt = strat.buy_size
+                    buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                else:
+                    pos_frac = strat.position_fraction if has_pos_frac else 1.0
+                    buy_cash = self.portfolio.cash * min(pos_frac, 1.0)
                 qty = buy_cash / price
                 if qty > 0:
                     cost = qty * price
@@ -199,7 +220,7 @@ class BacktestEngine:
 
                     self.portfolio.cash -= cost
                     self.portfolio.positions[self.symbol] = total_shares
-                    self.strategy.on_trade("buy", self.symbol, qty, price)
+                    strat.on_trade("buy", self.symbol, qty, price)
 
                     event_trade = {
                         "bar_index": i,
@@ -212,16 +233,15 @@ class BacktestEngine:
                     }
 
             elif signal in (Signal.SELL, Signal.EXIT) and self.portfolio.positions.get(self.symbol, 0) > 0:
-                strat = self.strategy
                 current_pos = self.portfolio.positions[self.symbol]
                 avg_entry = self.portfolio.avg_entry.get(self.symbol, price)
 
                 if signal == Signal.EXIT:
                     qty = current_pos
                 else:
-                    sell_pct = getattr(strat, "sell_portion", None)
-                    if sell_pct is not None:
-                        qty = current_pos * sell_pct / 100
+                    if has_sell_port:
+                        sell_pct = strat.sell_portion
+                        qty = current_pos * sell_pct / 100 if sell_pct is not None else current_pos
                     else:
                         qty = current_pos
 
@@ -232,9 +252,7 @@ class BacktestEngine:
                     new_pos = current_pos - qty
                     self.portfolio.positions[self.symbol] = new_pos
 
-                    if new_pos > 0:
-                        pass
-                    else:
+                    if new_pos <= 0:
                         self.portfolio.positions[self.symbol] = 0
                         self.portfolio.avg_entry[self.symbol] = 0.0
 
@@ -249,9 +267,7 @@ class BacktestEngine:
                     }
 
             equity = self.portfolio.cash + sum(
-                pos * float(self.data.iloc[i]["close"])
-                for sym, pos in self.portfolio.positions.items()
-                if pos > 0
+                pos * price for pos in self.portfolio.positions.values() if pos > 0
             )
             snapshot = {
                 "bar_index": i,
@@ -292,17 +308,38 @@ class MultiSymbolBacktestEngine:
             strategy.init(data[sym])
             self.strategies[sym] = strategy
 
+        self._close_arrs: dict[str, np.ndarray] = {
+            sym: df["close"].values for sym, df in data.items()
+        }
+        self._ts_sets: dict[str, set] = {
+            sym: set(df.index) for sym, df in data.items()
+        }
+        self._strat_attrs: dict[str, tuple[bool, bool, bool]] = {}
+        for sym in self.symbols:
+            s = self.strategies[sym]
+            self._strat_attrs[sym] = (
+                hasattr(s, "buy_size"),
+                hasattr(s, "position_fraction"),
+                hasattr(s, "sell_portion"),
+            )
+
+        for sym, div_df in self._dividends.items():
+            if div_df is not None and not div_df.empty:
+                self._dividends[sym].index = pd.to_datetime(div_df.index)
+
     def _get_union_timestamps(self) -> list[pd.Timestamp]:
-        all_ts = set()
+        if not self.data:
+            return []
+        union = pd.DatetimeIndex([])
         for df in self.data.values():
-            all_ts.update(df.index)
-        return sorted(all_ts)
+            union = union.union(df.index)
+        return sorted(union)
 
     def _apply_dividend(self, symbol: str, timestamp: pd.Timestamp) -> float:
         div_df = self._dividends.get(symbol)
         if div_df is None or div_df.empty:
             return 0.0
-        ts = pd.to_datetime(timestamp)
+        ts = pd.Timestamp(timestamp)
         match = div_df[div_df.index == ts]
         if match.empty:
             return 0.0
@@ -318,38 +355,47 @@ class MultiSymbolBacktestEngine:
         trades: list[dict] = []
         snapshots: list[dict] = []
         timestamps = self._get_union_timestamps()
-        local_idx: dict[str, int] = {sym: -1 for sym in self.symbols}
-        last_prices: dict[str, float] = {}
+        symbols = self.symbols
+        local_idx: dict[str, int] = {sym: -1 for sym in symbols}
+        last_prices: dict[str, float] = {sym: 0.0 for sym in symbols}
+        close_arrs = self._close_arrs
+        ts_sets = self._ts_sets
+        strategies = self.strategies
+        strat_attrs = self._strat_attrs
+        positions = self.portfolio.positions
 
         for global_i, ts in enumerate(timestamps):
-            ts = pd.Timestamp(ts)
-
-            for sym in self.symbols:
-                if ts not in self.data[sym].index:
+            for sym in symbols:
+                if ts not in ts_sets[sym]:
                     continue
                 local_idx[sym] += 1
                 i = local_idx[sym]
-                price = float(self.data[sym].loc[ts, "close"])
+                price = float(close_arrs[sym][i])
                 last_prices[sym] = price
 
                 self._apply_dividend(sym, ts)
-                signal = self.strategies[sym].next(i, self.data[sym], self.portfolio)
+                signal = strategies[sym].next(i, self.data[sym], self.portfolio)
 
                 if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
-                    strat = self.strategies[sym]
-                    trade_amt = getattr(strat, "buy_size", None)
-                    buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                    has_buy, has_frac, _ = strat_attrs[sym]
+                    strat = strategies[sym]
+                    if has_buy:
+                        trade_amt = strat.buy_size
+                        buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                    else:
+                        pos_frac = strat.position_fraction if has_frac else 1.0
+                        buy_cash = self.portfolio.cash * min(pos_frac, 1.0)
                     qty = buy_cash / price
                     if qty > 0:
                         cost = qty * price
-                        existing = self.portfolio.positions.get(sym, 0)
+                        existing = positions.get(sym, 0)
                         existing_cost = existing * self.portfolio.avg_entry.get(sym, 0)
                         total_shares = existing + qty
                         total_cost = existing_cost + cost
                         self.portfolio.avg_entry[sym] = total_cost / total_shares
                         self.portfolio.cash -= cost
-                        self.portfolio.positions[sym] = total_shares
-                        self.strategies[sym].on_trade("buy", sym, qty, price)
+                        positions[sym] = total_shares
+                        strategies[sym].on_trade("buy", sym, qty, price)
 
                         trades.append({
                             "bar_index": i,
@@ -361,17 +407,17 @@ class MultiSymbolBacktestEngine:
                             "pnl": None,
                         })
 
-                elif signal in (Signal.SELL, Signal.EXIT) and self.portfolio.positions.get(sym, 0) > 0:
-                    strat = self.strategies[sym]
-                    current_pos = self.portfolio.positions[sym]
+                elif signal in (Signal.SELL, Signal.EXIT) and positions.get(sym, 0) > 0:
+                    _, _, has_sell = strat_attrs[sym]
+                    current_pos = positions[sym]
                     avg = self.portfolio.avg_entry.get(sym, price)
 
                     if signal == Signal.EXIT:
                         qty = current_pos
                     else:
-                        sell_pct = getattr(strat, "sell_portion", None)
-                        if sell_pct is not None:
-                            qty = current_pos * sell_pct / 100
+                        if has_sell:
+                            sell_pct = strategies[sym].sell_portion
+                            qty = current_pos * sell_pct / 100 if sell_pct is not None else current_pos
                         else:
                             qty = current_pos
 
@@ -380,12 +426,10 @@ class MultiSymbolBacktestEngine:
                         pnl = round(proceeds - (avg * qty), 2)
                         self.portfolio.cash += proceeds
                         new_pos = current_pos - qty
-                        self.portfolio.positions[sym] = new_pos
+                        positions[sym] = new_pos
 
-                        if new_pos > 0:
-                            pass
-                        else:
-                            self.portfolio.positions[sym] = 0
+                        if new_pos <= 0:
+                            positions[sym] = 0
                             self.portfolio.avg_entry[sym] = 0.0
 
                         trades.append({
@@ -399,9 +443,8 @@ class MultiSymbolBacktestEngine:
                         })
 
             equity = self.portfolio.cash + sum(
-                self.portfolio.positions.get(sym, 0) * last_prices.get(sym, 0.0)
-                for sym in self.symbols
-                if self.portfolio.positions.get(sym, 0) > 0
+                last_prices[sym] * positions.get(sym, 0)
+                for sym in symbols if positions.get(sym, 0) > 0
             )
 
             snapshots.append({
@@ -427,21 +470,26 @@ class MultiSymbolBacktestEngine:
     def stream(self) -> Generator[dict, None, None]:
         self.portfolio = Portfolio(self.initial_cash)
         timestamps = self._get_union_timestamps()
-        local_idx: dict[str, int] = {sym: -1 for sym in self.symbols}
-        last_prices: dict[str, float] = {}
+        symbols = self.symbols
+        local_idx: dict[str, int] = {sym: -1 for sym in symbols}
+        last_prices: dict[str, float] = {sym: 0.0 for sym in symbols}
+        close_arrs = self._close_arrs
+        ts_sets = self._ts_sets
+        strategies = self.strategies
+        strat_attrs = self._strat_attrs
+        positions = self.portfolio.positions
 
         for global_i, ts in enumerate(timestamps):
-            ts = pd.Timestamp(ts)
             bar_trades: list[dict] = []
             bar_signals: list[str] = []
             bar_dividends: list[dict] = []
 
-            for sym in self.symbols:
-                if ts not in self.data[sym].index:
+            for sym in symbols:
+                if ts not in ts_sets[sym]:
                     continue
                 local_idx[sym] += 1
                 i = local_idx[sym]
-                price = float(self.data[sym].loc[ts, "close"])
+                price = float(close_arrs[sym][i])
                 last_prices[sym] = price
 
                 div_amount = self._apply_dividend(sym, ts)
@@ -453,24 +501,29 @@ class MultiSymbolBacktestEngine:
                         "dividend": div_amount,
                     })
 
-                signal = self.strategies[sym].next(i, self.data[sym], self.portfolio)
+                signal = strategies[sym].next(i, self.data[sym], self.portfolio)
                 bar_signals.append(signal)
 
                 if signal == Signal.BUY and self.portfolio.cash > 0 and price > 0:
-                    strat = self.strategies[sym]
-                    trade_amt = getattr(strat, "buy_size", None)
-                    buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                    has_buy, has_frac, _ = strat_attrs[sym]
+                    strat = strategies[sym]
+                    if has_buy:
+                        trade_amt = strat.buy_size
+                        buy_cash = min(trade_amt, self.portfolio.cash) if trade_amt is not None else self.portfolio.cash
+                    else:
+                        pos_frac = strat.position_fraction if has_frac else 1.0
+                        buy_cash = self.portfolio.cash * min(pos_frac, 1.0)
                     qty = buy_cash / price
                     if qty > 0:
                         cost = qty * price
-                        existing = self.portfolio.positions.get(sym, 0)
+                        existing = positions.get(sym, 0)
                         existing_cost = existing * self.portfolio.avg_entry.get(sym, 0)
                         total_shares = existing + qty
                         total_cost = existing_cost + cost
                         self.portfolio.avg_entry[sym] = total_cost / total_shares
                         self.portfolio.cash -= cost
-                        self.portfolio.positions[sym] = total_shares
-                        self.strategies[sym].on_trade("buy", sym, qty, price)
+                        positions[sym] = total_shares
+                        strategies[sym].on_trade("buy", sym, qty, price)
 
                         bar_trades.append({
                             "bar_index": global_i,
@@ -482,17 +535,17 @@ class MultiSymbolBacktestEngine:
                             "pnl": None,
                         })
 
-                elif signal in (Signal.SELL, Signal.EXIT) and self.portfolio.positions.get(sym, 0) > 0:
-                    strat = self.strategies[sym]
-                    current_pos = self.portfolio.positions[sym]
+                elif signal in (Signal.SELL, Signal.EXIT) and positions.get(sym, 0) > 0:
+                    _, _, has_sell = strat_attrs[sym]
+                    current_pos = positions[sym]
                     avg = self.portfolio.avg_entry.get(sym, price)
 
                     if signal == Signal.EXIT:
                         qty = current_pos
                     else:
-                        sell_pct = getattr(strat, "sell_portion", None)
-                        if sell_pct is not None:
-                            qty = current_pos * sell_pct / 100
+                        if has_sell:
+                            sell_pct = strategies[sym].sell_portion
+                            qty = current_pos * sell_pct / 100 if sell_pct is not None else current_pos
                         else:
                             qty = current_pos
 
@@ -501,12 +554,10 @@ class MultiSymbolBacktestEngine:
                         pnl = round(proceeds - (avg * qty), 2)
                         self.portfolio.cash += proceeds
                         new_pos = current_pos - qty
-                        self.portfolio.positions[sym] = new_pos
+                        positions[sym] = new_pos
 
-                        if new_pos > 0:
-                            pass
-                        else:
-                            self.portfolio.positions[sym] = 0
+                        if new_pos <= 0:
+                            positions[sym] = 0
                             self.portfolio.avg_entry[sym] = 0.0
 
                         bar_trades.append({
@@ -520,9 +571,8 @@ class MultiSymbolBacktestEngine:
                         })
 
             equity = self.portfolio.cash + sum(
-                self.portfolio.positions.get(sym, 0) * last_prices.get(sym, 0.0)
-                for sym in self.symbols
-                if self.portfolio.positions.get(sym, 0) > 0
+                last_prices[sym] * positions.get(sym, 0)
+                for sym in symbols if positions.get(sym, 0) > 0
             )
 
             snapshot = {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   api,
   type StrategyInfo,
@@ -25,18 +25,22 @@ export default function Live() {
   const [log, setLog] = useState<string[]>([]);
   const wsRef = useRef<ReturnType<typeof api.createLiveSocket> | null>(null);
 
-  const markers = trades
-    .filter((t): t is Trade & { side: "buy" | "sell" } => t.side === "buy" || t.side === "sell")
-    .map((t) => ({
-      time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
-      side: t.side,
-    }));
+  const markers = useMemo(
+    () =>
+      trades
+        .filter((t): t is Trade & { side: "buy" | "sell" } => t.side === "buy" || t.side === "sell")
+        .map((t) => ({
+          time: (new Date(t.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+          side: t.side,
+        })),
+    [trades],
+  );
 
-  const toggleSymbol = (sym: string) => {
+  const toggleSymbol = useCallback((sym: string) => {
     setSelectedSymbols((prev) =>
       prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym]
     );
-  };
+  }, []);
 
   useEffect(() => {
     api.getStrategies().then((list) => {
@@ -49,6 +53,8 @@ export default function Live() {
         }
         setParams(defaults);
       }
+    }).catch((e: unknown) => {
+      addLog(`Failed to load strategies: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
@@ -67,7 +73,7 @@ export default function Live() {
     [strategies],
   );
 
-  const addLog = (msg: string) => setLog((prev) => [...prev, msg]);
+  const addLog = useCallback((msg: string) => setLog((prev) => [...prev, msg]), []);
 
   const equityRef = useRef<{ time: import("lightweight-charts").Time; value: number }[]>([]);
 
@@ -94,8 +100,8 @@ export default function Live() {
             time: (new Date(event.timestamp).getTime() / 1000) as unknown as import("lightweight-charts").Time,
             value: event.equity,
           };
-          equityRef.current = [...equityRef.current, point];
-          setEquityPoints(equityRef.current);
+          equityRef.current.push(point);
+          setEquityPoints([...equityRef.current]);
           setCash(event.cash);
           for (const trade of event.trades) {
             setTrades((prev) => [...prev, trade]);

@@ -207,7 +207,7 @@ python -m backend.ml.train \
 | `--symbols` | NVDA,AMD,VOO,SPY,META | Comma-separated symbols |
 | `--years` | 20 | Years of history |
 | `--name` | multi_symbol_model | Model name for saving |
-| `--model-types` | rf,gbt | Model types: rf, gbt, xgb, lgb |
+| `--model-types` | rf,gbt | Model types: rf, gbt, xgb, lgb, sgd, mlp |
 | `--n-estimators` | 200 | Number of trees |
 | `--max-depth` | 10 | Max tree depth |
 | `--learning-rate` | 0.1 | Learning rate (GBT/XGB/LGB) |
@@ -234,7 +234,7 @@ python -m backend.ml.train \
 | `--context-symbols` | None | Cross-symbol features (e.g. SPY,VOO) |
 | `--multi-horizon` | None | Multi-horizon ensemble horizons (e.g. 1,5,21) |
 | `--regime-aware` | False | Regime-aware switching via Hurst/choppiness |
-| `--model-types` | rf,gbt | Extended: rf, gbt, xgb, lgb, sgd, mlp |
+| `--model-dir` | backend/ml/models/ | Output directory for saved models |
 
 ### What "Beating" Means
 

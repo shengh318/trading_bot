@@ -21,8 +21,6 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.stattools import adfuller, coint
-
 from .config import (
     DEFAULT_SIGNIFICANCE,
     DEFAULT_WALK_FORWARD_TRAIN,
@@ -38,7 +36,7 @@ from .config import (
     DEFAULT_MAX_HOLDING_DAYS,
     WALK_FORWARD_ADF_MAXLAG,
 )
-from .hedge_ratio import estimate_ols
+from backend.cpp_ext import estimate_ols, adf_test, eg_coint_test
 from .strategy import TradingStrategy, TradeRecord
 
 logger = logging.getLogger("stats_arb.walk_forward")
@@ -225,13 +223,13 @@ class WalkForwardValidator:
         b_test = test[self.cols[1]].values
         spread_test = a_test - hr * b_test
 
-        # EG on training data
-        _, train_p_val, _ = coint(a_train, b_train, maxlag=1, autolag="AIC")
+        # EG on training data — C++ accelerated
+        _, train_p_val, _ = eg_coint_test(a_train, b_train, maxlag=1, autolag=True)
 
         # ADF on OOS spread with frozen hedge ratio (NO re-estimation on test)
-        adf_stat, oos_p_val = adfuller(
-            spread_test, maxlag=WALK_FORWARD_ADF_MAXLAG, autolag="AIC"
-        )[:2]
+        adf_stat, oos_p_val = adf_test(
+            spread_test, maxlag=WALK_FORWARD_ADF_MAXLAG, autolag=True,
+        )
 
         hl = self._estimate_half_life(spread_test)
         spread_sharpe = self._compute_spread_sharpe(spread_test)
@@ -263,17 +261,12 @@ class WalkForwardValidator:
         import math
         if len(spread) < 10:
             return float("inf")
-        s = pd.Series(spread)
-        lagged = s.shift(1).dropna().values
-        delta = s.diff().dropna().values
-        if len(lagged) < 5:
+        lagged = spread[:-1]
+        delta = spread[1:] - spread[:-1]
+        mask = np.isfinite(lagged) & np.isfinite(delta)
+        if mask.sum() < 5:
             return float("inf")
-        lagged_const = np.column_stack([np.ones_like(lagged), lagged])
-        try:
-            theta, _, _, _ = np.linalg.lstsq(lagged_const, delta, rcond=None)
-        except np.linalg.LinAlgError:
-            return float("inf")
-        theta_val = theta[1]
+        theta_val = estimate_ols(delta[mask], lagged[mask], add_const=True)
         if theta_val >= 0:
             return float("inf")
         hl = -math.log(2) / theta_val
@@ -297,9 +290,8 @@ class WalkForwardValidator:
 
     @staticmethod
     def _is_stationary(series: np.ndarray) -> bool:
-        from statsmodels.tsa.stattools import adfuller
         try:
-            p = float(adfuller(series, maxlag=1, autolag="AIC")[1])
+            _, p = adf_test(series, maxlag=1, autolag=True)
             return bool(p < 0.05)
         except Exception:
             return False

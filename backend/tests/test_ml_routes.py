@@ -11,7 +11,7 @@ client = TestClient(app)
 
 class TestMlModels:
     def test_list_models_returns_empty_when_no_models(self):
-        with patch("backend.api.ml_routes.list_models") as mock_list:
+        with patch("backend.ml.model.list_models") as mock_list:
             mock_list.return_value = []
             response = client.get("/api/ml/models")
             assert response.status_code == 200
@@ -24,7 +24,7 @@ class TestMlModels:
              "context_symbols": [], "validation_metrics": {},
              "beat_baselines": False, "versions": [1]},
         ]
-        with patch("backend.api.ml_routes.list_models") as mock_list:
+        with patch("backend.ml.model.list_models") as mock_list:
             mock_list.return_value = mock_models
             response = client.get("/api/ml/models")
             assert response.status_code == 200
@@ -33,7 +33,7 @@ class TestMlModels:
             assert data[0]["name"] == "RF_v1"
 
     def test_get_model_returns_404_for_unknown(self):
-        with patch("backend.api.ml_routes.list_models") as mock_list:
+        with patch("backend.ml.model.list_models") as mock_list:
             mock_list.return_value = []
             response = client.get("/api/ml/models/unknown")
             assert response.status_code == 404
@@ -45,20 +45,20 @@ class TestMlModels:
              "context_symbols": [], "validation_metrics": {},
              "beat_baselines": False, "versions": [1]},
         ]
-        with patch("backend.api.ml_routes.list_models") as mock_list:
+        with patch("backend.ml.model.list_models") as mock_list:
             mock_list.return_value = mock_models
             response = client.get("/api/ml/models/RF_v1")
             assert response.status_code == 200
             assert response.json()["name"] == "RF_v1"
 
     def test_delete_model_calls_delete(self):
-        with patch("backend.api.ml_routes.delete_model") as mock_delete:
+        with patch("backend.ml.model.delete_model") as mock_delete:
             response = client.delete("/api/ml/models/test_model")
             assert response.status_code == 200
             mock_delete.assert_called_with("test_model", version=None)
 
     def test_delete_model_with_version(self):
-        with patch("backend.api.ml_routes.delete_model") as mock_delete:
+        with patch("backend.ml.model.delete_model") as mock_delete:
             response = client.delete("/api/ml/models/test_model?version=2")
             assert response.status_code == 200
             mock_delete.assert_called_with("test_model", version=2)
@@ -130,7 +130,7 @@ class TestMlRetrain:
 
     def test_retrain_status_unknown_for_nonexistent(self):
         with patch("backend.api.ml_routes._active_pids", {}), \
-             patch("backend.api.ml_routes.list_models", return_value=[]):
+             patch("backend.ml.model.list_models", return_value=[]):
             response = client.get("/api/ml/retrain/status/nonexistent")
             assert response.status_code == 200
             assert response.json()["status"] == "unknown"
@@ -143,7 +143,7 @@ class TestMlRetrain:
              "beat_baselines": False, "versions": [1]},
         ]
         with patch("backend.api.ml_routes._active_pids", {}), \
-             patch("backend.api.ml_routes.list_models", return_value=mock_models):
+             patch("backend.ml.model.list_models", return_value=mock_models):
             response = client.get("/api/ml/retrain/status/existing_model")
             assert response.status_code == 200
             assert response.json()["status"] == "completed"

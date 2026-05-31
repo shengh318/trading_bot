@@ -19,6 +19,8 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from backend.cpp_ext import hurst_exponent, rolling_hurst, cusum_breaks, bai_perron_breaks
+
 from .config import REGIME_VOL_WINDOW, VIX_TICKER, CUSUM_CONFIDENCE, CHOW_SIGNIFICANCE, BAI_PERRON_MAX_BREAKS, BAI_PERRON_MIN_SEGMENT
 
 logger = logging.getLogger("stats_arb.regime")
@@ -218,19 +220,12 @@ class RegimeDetector:
         )
 
     def _compute_rolling_hurst(self) -> pd.Series:
-        """Compute rolling Hurst exponent."""
-        result: list[float] = []
-        indices: list[pd.Timestamp] = []
+        """Compute rolling Hurst exponent — C++ accelerated."""
         values = self.spread.values
-        idx = self.spread.index
-
-        for i in range(self.hurst_window, len(values) + 1):
-            chunk = values[i - self.hurst_window : i]
-            h = self._hurst_exponent(chunk)
-            result.append(h)
-            indices.append(idx[i - 1])
-
-        return pd.Series(result, index=indices)
+        hurst_vals = rolling_hurst(values, self.hurst_window)
+        # rolling_hurst[i] = NaN for i < hurst_window-1; use only valid positions
+        valid_mask = np.isfinite(hurst_vals)
+        return pd.Series(hurst_vals[valid_mask], index=self.spread.index[valid_mask])
 
     def _compute_rolling_volatility(self) -> pd.Series:
         """Compute rolling spread standard deviation."""
@@ -238,36 +233,8 @@ class RegimeDetector:
 
     @staticmethod
     def _hurst_exponent(ts: np.ndarray) -> float:
-        """Rescaled range (R/S) Hurst exponent."""
-        if len(ts) < 20:
-            return 0.5
-        ts = np.asarray(ts)
-        max_lag = len(ts) // 2
-        if max_lag < 3:
-            return 0.5
-        lags = range(2, max_lag)
-        tau: list[float] = []
-        for lag in lags:
-            chunks = len(ts) // lag
-            if chunks < 1:
-                continue
-            trimmed = ts[: chunks * lag]
-            reshaped = trimmed.reshape((chunks, lag))
-            mean_adj = reshaped - reshaped.mean(axis=1, keepdims=True)
-            cumsum = mean_adj.cumsum(axis=1)
-            std_vals = reshaped.std(axis=1, ddof=0)
-            std_vals = np.where(std_vals > 0, std_vals, np.nan)
-            rs = (cumsum.max(axis=1) - cumsum.min(axis=1)) / std_vals
-            rs = rs[~np.isnan(rs)]
-            if len(rs) > 0:
-                tau.append(float(rs.mean()))
-        if len(tau) < 3:
-            return 0.5
-        lags_used = list(lags[: len(tau)])
-        if len(lags_used) < 3:
-            return 0.5
-        reg = np.polyfit(np.log(lags_used), np.log(tau), 1)
-        return max(0.0, min(1.0, float(reg[0])))
+        """Rescaled range (R/S) Hurst exponent — C++ accelerated."""
+        return hurst_exponent(ts)
 
     @staticmethod
     def _classify_hurst_regime(hurst: pd.Series) -> pd.Series:
@@ -359,43 +326,13 @@ class RegimeDetector:
     def _detect_cusum_break(
         self, confidence: float = CUSUM_CONFIDENCE,
     ) -> tuple[bool, list[int], np.ndarray]:
-        """CUSUM test via recursive residuals.
-
-        Fits OLS of spread ~ constant, computes recursive residuals,
-        and checks if cumulative sum exceeds confidence bounds.
-        """
+        """CUSUM test via recursive residuals — C++ accelerated."""
         n = len(self.spread)
         if n < 30:
             return False, [], np.array([])
 
-        y = self.spread.values
-        x = np.ones((n, 1))
-        beta, _, _, _ = np.linalg.lstsq(x, y, rcond=None)
-        recursive_residuals: list[float] = []
-
-        for t in range(2, n + 1):
-            y_t = y[:t]
-            x_t = np.ones((t, 1))
-            beta_t, _, _, _ = np.linalg.lstsq(x_t, y_t, rcond=None)
-            pred = beta_t[0]
-            err = y[t - 1] - pred
-            denom = np.sqrt(1.0 + 1.0 / t)
-            recursive_residuals.append(err / denom)
-
-        rr = np.array(recursive_residuals)
-        sigma = np.std(rr)
-        if sigma == 0:
-            return False, [], np.array([])
-
-        std_rr = rr / sigma
-        cusum = np.cumsum(std_rr)
-
-        z = {0.90: 0.850, 0.95: 0.948, 0.99: 1.143}.get(confidence, 0.948)
-        bound = z * np.sqrt(n - 1)
-        breaks = np.where(np.abs(cusum) > bound)[0].tolist()
-        has_break = len(breaks) > 0
-
-        return has_break, breaks, cusum
+        has_break, idx_arr, cusum_arr = cusum_breaks(self.spread.values, confidence)
+        return has_break, idx_arr.tolist() if len(idx_arr) > 0 else [], cusum_arr
 
     def _detect_chow_break(
         self, candidate_break: int, significance: float = CHOW_SIGNIFICANCE,
@@ -434,71 +371,9 @@ class RegimeDetector:
     def _detect_bai_perron_breaks(
         self, max_breaks: int = BAI_PERRON_MAX_BREAKS, min_segment: int = BAI_PERRON_MIN_SEGMENT,
     ) -> list[int]:
-        """Sequential breakpoint detection (simplified Bai-Perron).
-
-        1. Find single break via argmin RSS over all valid positions
-        2. Split at break, recurse on each segment
-        3. Stop when: BIC doesn't improve, max_breaks reached, or segment too small
-        """
-        def _find_single_break(y: np.ndarray) -> tuple[int, float, float]:
-            n = len(y)
-            best_bic = float("inf")
-            best_pos = -1
-            x = np.ones((n, 1))
-            beta_pooled, _, _, _ = np.linalg.lstsq(x, y, rcond=None)
-            rss_pooled = float(np.sum((y - x @ beta_pooled) ** 2))
-            pooled_bic = n * np.log(rss_pooled / n) + 2 * np.log(n)
-
-            for pos in range(min_segment, n - min_segment):
-                y1, y2 = y[:pos], y[pos:]
-                x1, x2 = np.ones((len(y1), 1)), np.ones((len(y2), 1))
-                beta1, _, _, _ = np.linalg.lstsq(x1, y1, rcond=None)
-                beta2, _, _, _ = np.linalg.lstsq(x2, y2, rcond=None)
-                rss1 = float(np.sum((y1 - x1 @ beta1) ** 2))
-                rss2 = float(np.sum((y2 - x2 @ beta2) ** 2))
-                rss = rss1 + rss2
-                k = 4
-                bic = n * np.log(rss / n) + k * np.log(n)
-                if bic < best_bic:
-                    best_bic = bic
-                    best_pos = pos
-
-            return best_pos, best_bic, pooled_bic
-
-        breaks: list[int] = []
-        segments = [(0, len(self.spread.values))]
-        y_full = self.spread.values
-
-        while len(breaks) < max_breaks:
-            best_seg_idx = -1
-            best_break = -1
-            best_bic_improvement = 0.0
-            best_pos_local = -1
-
-            for seg_idx, (start, end) in enumerate(segments):
-                y_seg = y_full[start:end]
-                if len(y_seg) < 2 * min_segment:
-                    continue
-                pos, bic, pooled_bic = _find_single_break(y_seg)
-                if pos < 0:
-                    continue
-                improvement = pooled_bic - bic
-                if improvement > best_bic_improvement:
-                    best_bic_improvement = improvement
-                    best_seg_idx = seg_idx
-                    best_break = start + pos
-                    best_pos_local = pos
-
-            if best_break < 0 or best_bic_improvement <= 0:
-                break
-
-            breaks.append(best_break)
-            seg_start, seg_end = segments.pop(best_seg_idx)
-            segments.append((seg_start, best_break))
-            segments.append((best_break, seg_end))
-            segments.sort()
-
-        return sorted(breaks)
+        """Bai-Perron breakpoint detection — C++ accelerated."""
+        breaks_arr = bai_perron_breaks(self.spread.values, max_breaks, min_segment)
+        return sorted(breaks_arr.tolist()) if len(breaks_arr) > 0 else []
 
     def _detect_structural_break(
         self, rolling_hurst: pd.Series, rolling_vol: pd.Series

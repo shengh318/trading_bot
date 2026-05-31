@@ -54,8 +54,8 @@ class AutoCointStrategy(Strategy):
     def __init__(
         self,
         symbols: str = "NVDA,AMD",
-        min_corr: float = 0.7,
-        z_entry: float = 2.0,
+        min_corr: float = 0.3,
+        z_entry: float = 1.5,
         z_exit: float = 0.0,
         stop_loss: float = 3.0,
         max_holding_days: int = 40,
@@ -100,7 +100,10 @@ class AutoCointStrategy(Strategy):
         if symbol_a not in all_symbols:
             all_symbols.insert(0, symbol_a)
 
-        prices = self._download_prices(all_symbols, data.index[0], data.index[-1])
+        end_date = data.index[-1]
+        lookback = pd.Timestamp(end_date) - pd.Timedelta(days=365 * 12)
+        discovery_start = min(pd.Timestamp(data.index[0]), lookback)
+        prices = self._download_prices(all_symbols, discovery_start, end_date)
         if prices is None or len(prices.columns) < 2:
             logger.error("AutoCointStrategy: could not download price data. All HOLD.")
             self._create_dummy()
@@ -139,8 +142,10 @@ class AutoCointStrategy(Strategy):
         self._spread = spread
         self._zscore = zscore
         logger.info(
-            "AutoCointStrategy: selected pair %s/%s, hedge_ratio=%.4f",
+            "AutoCointStrategy: selected pair %s/%s, hedge_ratio=%.4f, "
+            "z-score range [%.2f, %.2f] over %d bars",
             symbol_a, symbol_b, hedge_ratio,
+            float(zscore.min()), float(zscore.max()), len(zscore),
         )
 
     def next(self, i: int, data: pd.DataFrame, portfolio: Portfolio) -> str:
@@ -190,6 +195,8 @@ class AutoCointStrategy(Strategy):
             return None
         if isinstance(close, pd.DataFrame):
             close = close.dropna(how="all", axis=1)
+        if close.index.tz is not None:
+            close.index = close.index.tz_localize(None)
         return close.ffill()
 
     def _find_best_pair(self, prices: pd.DataFrame, symbol_a: str) -> tuple[str, float] | None:
@@ -198,39 +205,41 @@ class AutoCointStrategy(Strategy):
             return None
 
         returns = prices.pct_change().dropna()
-        corr_series = returns.corr()[symbol_a].drop(symbol_a)
+        corr_series = returns.corr()[symbol_a].drop(symbol_a).dropna()
 
-        high_corr = corr_series[
-            (corr_series >= self.min_corr) & (corr_series < 0.99) & corr_series.notna()
-        ].sort_values(ascending=False)
-
-        if high_corr.empty:
-            logger.info("AutoCointStrategy: no symbol correlated >= %.1f with %s", self.min_corr, symbol_a)
-            return None
-
-        top_n = min(10, len(high_corr))
-        candidates_ordered = list(high_corr.head(top_n).index)
+        ordered = corr_series.sort_values(ascending=False)
+        top_n = min(10, len(ordered))
+        candidates_ordered = list(ordered.head(top_n).index)
 
         best_pair: tuple[str, float] | None = None
         best_p = 1.0
 
-        for sym_b in candidates_ordered:
-            pair_prices = prices[[symbol_a, sym_b]].dropna(how="any")
-            if len(pair_prices) < 100:
-                continue
-            try:
-                ct = CointegrationTester(pair_prices, significance=0.05)
-                result = ct.run()
-                if result.is_cointegrated and result.p_value < best_p:
-                    best_p = result.p_value
-                    best_pair = (sym_b, result.hedge_ratio)
-            except Exception:
-                continue
+        for sig in (0.05, 0.10):
+            for sym_b in candidates_ordered:
+                pair_prices = prices[[symbol_a, sym_b]].dropna(how="any")
+                if len(pair_prices) < 100:
+                    continue
+                try:
+                    ct = CointegrationTester(pair_prices, significance=sig)
+                    result = ct.run()
+                    if result.is_cointegrated and result.p_value < best_p:
+                        best_p = result.p_value
+                        best_pair = (sym_b, result.hedge_ratio)
+                except Exception:
+                    continue
+            if best_pair is not None:
+                break
 
         if best_pair is not None:
             logger.info(
                 "AutoCointStrategy: best pair %s/%s p=%.6f hr=%.4f",
                 symbol_a, best_pair[0], best_p, best_pair[1],
+            )
+        else:
+            logger.warning(
+                "AutoCointStrategy: no cointegrated pair found for %s "
+                "(checked %d candidates with %d bars each)",
+                symbol_a, len(candidates_ordered), len(prices),
             )
         return best_pair
 

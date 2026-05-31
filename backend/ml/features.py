@@ -5,6 +5,17 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from backend.cpp_ext import (
+    hurst_exponent,
+    rolling_hurst as cpp_rolling_hurst,
+    rsi as cpp_rsi,
+    macd as cpp_macd,
+    bollinger as cpp_bollinger,
+    atr as cpp_atr,
+    mfi as cpp_mfi,
+    adx as cpp_adx,
+)
+
 EXCLUDED_COLUMNS = {"open", "high", "low", "close", "volume", "trade_count", "vwap", "symbol", "target"}
 
 _EPS = 1e-12
@@ -16,8 +27,7 @@ def safe_divide(num, denom):
     The caller should call :func:`clean_features` on the full DataFrame
     afterwards to fill remaining NaN values with 0.
     """
-    denom = denom.replace(0, np.nan)
-    return num / denom
+    return num / denom.replace(0, np.nan)
 
 
 def safe_pct_change(series: pd.Series, periods: int = 1) -> pd.Series:
@@ -31,43 +41,8 @@ def clean_features(df: pd.DataFrame, fill_val: float = 0.0) -> pd.DataFrame:
 
 
 def _hurst_exponent(ts: np.ndarray) -> float:
-    """Compute Hurst exponent via multi-lag rescaled range (R/S) regression.
-
-    Regresses log(E[R/S]) vs log(lag) across multiple lags.
-    H < 0.5 → mean-reverting, H = 0.5 → random walk, H > 0.5 → trending.
-    """
-    if len(ts) < 20:
-        return 0.5
-    ts = np.asarray(ts, dtype=float)
-    if np.nanmin(ts) == np.nanmax(ts):
-        return 0.5
-    max_lag = len(ts) // 2
-    if max_lag < 3:
-        return 0.5
-    lags = range(2, max_lag)
-    tau: list[float] = []
-    for lag in lags:
-        chunks = len(ts) // lag
-        if chunks < 1:
-            continue
-        trimmed = ts[: chunks * lag]
-        reshaped = trimmed.reshape((chunks, lag))
-        mean_adj = reshaped - reshaped.mean(axis=1, keepdims=True)
-        cumsum = mean_adj.cumsum(axis=1)
-        std_vals = reshaped.std(axis=1, ddof=0)
-        std_vals = np.where(std_vals > 0, std_vals, np.nan)
-        rs = (cumsum.max(axis=1) - cumsum.min(axis=1)) / std_vals
-        rs = rs[~np.isnan(rs)]
-        if len(rs) > 0:
-            tau.append(float(rs.mean()))
-    if len(tau) < 3:
-        return 0.5
-    lags_used = list(lags[: len(tau)])
-    if len(lags_used) < 3:
-        return 0.5
-    reg = np.polyfit(np.log(lags_used), np.log(tau), 1)
-    h = float(reg[0])
-    return max(0.0, min(1.0, h))
+    """Compute Hurst exponent via rescaled range (R/S) analysis — C++ accelerated."""
+    return hurst_exponent(ts)
 
 
 def compute_features(data: pd.DataFrame) -> pd.DataFrame:
@@ -108,32 +83,26 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     data["vol_ma_20"] = volume.rolling(20).mean()
     data["vol_ratio"] = safe_divide(volume, data["vol_ma_20"])
 
-    # --- RSI (14-period) ---
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(14).mean()
-    avg_loss = loss.rolling(14).mean()
-    # When avg_loss = 0 and avg_gain > 0, RS = inf → RSI = 100 (correct).
-    # When both = 0 (flat prices), RS = NaN → fill with 1 → RSI = 50.
-    rs = avg_gain / avg_loss
-    rs = rs.fillna(1.0)
-    data["rsi"] = 100 - (100 / (1 + rs))
+    # --- RSI (14-period) — C++ accelerated ---
+    rsi_vals = cpp_rsi(close.values.astype(float), 14)
+    data["rsi"] = pd.Series(rsi_vals, index=data.index)
 
-    # --- MACD ---
-    ema_12 = close.ewm(span=12, adjust=False).mean()
-    ema_26 = close.ewm(span=26, adjust=False).mean()
-    data["macd"] = ema_12 - ema_26
-    data["macd_signal"] = data["macd"].ewm(span=9, adjust=False).mean()
-    data["macd_hist"] = data["macd"] - data["macd_signal"]
+    # --- MACD — C++ accelerated ---
+    macd_line, macd_signal, macd_hist = cpp_macd(close.values.astype(float), 12, 26, 9)
+    data["macd"] = pd.Series(macd_line, index=data.index)
+    data["macd_signal"] = pd.Series(macd_signal, index=data.index)
+    data["macd_hist"] = pd.Series(macd_hist, index=data.index)
 
-    # --- ATR (14-period) ---
-    tr = pd.concat([
-        high - low,
-        (high - close.shift(1)).abs(),
-        (low - close.shift(1)).abs(),
-    ], axis=1).max(axis=1)
-    data["atr"] = tr.rolling(14).mean()
+    # --- True Range (computed once, reused for ATR, Choppiness, ADX) ---
+    high_low = high - low
+    hc_abs = (high - close.shift(1)).abs()
+    lc_abs = (low - close.shift(1)).abs()
+    tr = pd.concat([high_low, hc_abs, lc_abs], axis=1).max(axis=1)
+
+    # --- ATR (14-period) — C++ accelerated ---
+    atr_vals = cpp_atr(high.values.astype(float), low.values.astype(float),
+                       close.values.astype(float), 14)
+    data["atr"] = pd.Series(atr_vals, index=data.index)
 
     # --- Price position in 20-bar range ---
     data["highest_20"] = high.rolling(20).max()
@@ -160,59 +129,32 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
 
     # ── New features ────────────────────────────────────────────────────────
 
-    # --- Bollinger Bands (20,2) ---
-    bb_mid = close.rolling(20).mean()
-    bb_std = close.rolling(20).std()
-    bb_upper = bb_mid + 2 * bb_std
-    bb_lower = bb_mid - 2 * bb_std
-    data["bb_width"] = safe_divide(bb_upper - bb_lower, bb_mid)
-    bb_range = (bb_upper - bb_lower).replace(0, np.nan)
-    data["bb_pct_b"] = safe_divide(close - bb_lower, bb_range)
+    # --- Bollinger Bands (20,2) — C++ accelerated ---
+    bb_width, bb_pct_b = cpp_bollinger(close.values.astype(float), 20, 2.0)
+    data["bb_width"] = pd.Series(bb_width, index=data.index)
+    data["bb_pct_b"] = pd.Series(bb_pct_b, index=data.index)
 
-    # --- ADX (Average Directional Index, 14-period) ---
-    high_lag = high.shift(1)
-    low_lag = low.shift(1)
-    up_move = high - high_lag
-    down_move = low_lag - low
-    plus_dm = pd.Series(
-        np.where((up_move > down_move) & (up_move > 0), up_move, 0),
-        index=data.index,
+    # --- ADX (Average Directional Index, 14-period) — C++ accelerated ---
+    adx_vals, plus_di_vals, minus_di_vals = cpp_adx(
+        high.values.astype(float), low.values.astype(float),
+        close.values.astype(float), 14,
     )
-    minus_dm = pd.Series(
-        np.where((down_move > up_move) & (down_move > 0), down_move, 0),
-        index=data.index,
-    )
-    tr_adx = pd.concat([
-        high - low,
-        (high - low_lag).abs(),
-        (low - low_lag).abs(),
-    ], axis=1).max(axis=1)
-    alpha = 1 / 14
-    s_plus_dm = plus_dm.ewm(alpha=alpha, adjust=False).mean()
-    s_minus_dm = minus_dm.ewm(alpha=alpha, adjust=False).mean()
-    s_tr = tr_adx.ewm(alpha=alpha, adjust=False).mean()
-    plus_di = 100 * safe_divide(s_plus_dm, s_tr)
-    minus_di = 100 * safe_divide(s_minus_dm, s_tr)
-    dx = 100 * safe_divide((plus_di - minus_di).abs(), plus_di + minus_di)
-    data["adx"] = dx.ewm(alpha=alpha, adjust=False).mean()
-    data["plus_di"] = plus_di
-    data["minus_di"] = minus_di
+    data["adx"] = pd.Series(adx_vals, index=data.index)
+    data["plus_di"] = pd.Series(plus_di_vals, index=data.index)
+    data["minus_di"] = pd.Series(minus_di_vals, index=data.index)
 
-    # --- OBV (normalized as ratio to 20-bar average) ---
-    obv = (volume * np.sign(close.diff())).fillna(0).cumsum()
+    # --- OBV (normalized as ratio to 20-bar average) using numpy ---
+    close_diff = close.diff().values
+    close_diff_sign = np.where(np.isnan(close_diff), 0.0, np.sign(close_diff))
+    obv_vals = np.cumsum(volume.values * close_diff_sign)
+    obv = pd.Series(obv_vals, index=data.index)
     obv_ma = obv.rolling(20).mean().replace(0, np.nan)
     data["obv_ratio"] = safe_divide(obv, obv_ma)
 
-    # --- MFI (Money Flow Index, 14-period) ---
-    typical_price = (high + low + close) / 3
-    raw_mf = typical_price * volume
-    pos_mf = raw_mf.where(typical_price > typical_price.shift(1), 0).rolling(14).sum()
-    neg_mf = raw_mf.where(typical_price < typical_price.shift(1), 0).rolling(14).sum()
-    # When neg_mf = 0 and pos_mf > 0, MFR = inf → MFI = 100 (correct).
-    # When both = 0 (flat prices), MFR = NaN → fill with 1 → MFI = 50.
-    mfr = pos_mf / neg_mf
-    mfr = mfr.fillna(1.0)
-    data["mfi"] = 100 - (100 / (1 + mfr))
+    # --- MFI (Money Flow Index, 14-period) — C++ accelerated ---
+    mfi_vals = cpp_mfi(high.values.astype(float), low.values.astype(float),
+                        close.values.astype(float), volume.values.astype(float), 14)
+    data["mfi"] = pd.Series(mfi_vals, index=data.index)
 
     # --- Lag features ---
     data["ret_1_lag1"] = data["ret_1"].shift(1)
@@ -221,19 +163,12 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     data["rsi_lag1"] = data["rsi"].shift(1)
     data["vol_21_lag1"] = data["vol_21"].shift(1)
 
-    # --- Hurst exponent (50-bar window, regime indicator) ---
-    hurst = close.rolling(50, min_periods=20).apply(
-        lambda x: _hurst_exponent(x), raw=True
-    )
-    data["hurst"] = hurst.fillna(0.5)
+    # --- Hurst exponent (50-bar window, regime indicator) — C++ accelerated ---
+    hurst_vals = cpp_rolling_hurst(close.values.astype(float), 50)
+    data["hurst"] = pd.Series(hurst_vals, index=data.index).fillna(0.5)
 
-    # --- Choppiness index (14-bar) ---
-    tr_ch = pd.concat([
-        high - low,
-        (high - close.shift(1)).abs(),
-        (low - close.shift(1)).abs(),
-    ], axis=1).max(axis=1)
-    atr_sum = tr_ch.rolling(14).sum()
+    # --- Choppiness index (14-bar, reuses TR from above) ---
+    atr_sum = tr.rolling(14).sum()
     high_max = high.rolling(14).max()
     low_min = low.rolling(14).min()
     h_l_range = (high_max - low_min).replace(0, np.nan)

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useTheme } from "../theme/ThemeContext";
 import type { StrategyInfo } from "../api/client";
 
@@ -9,7 +10,7 @@ interface Props {
   onParamChange: (name: string, value: unknown) => void;
 }
 
-export default function StrategySelector({
+function StrategySelector({
   strategies,
   selected,
   params,
@@ -89,3 +90,6 @@ export default function StrategySelector({
     </div>
   );
 }
+
+export default memo(StrategySelector);
+

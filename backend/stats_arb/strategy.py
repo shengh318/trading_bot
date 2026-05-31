@@ -16,6 +16,8 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from backend.cpp_ext import hurst_exponent, rolling_hurst as cpp_rolling_hurst
+
 from .config import (
     DEFAULT_Z_ENTRY,
     DEFAULT_Z_EXIT,
@@ -209,15 +211,10 @@ class TradingStrategy:
         a_shares = 0.0
         b_shares = 0.0
 
-        # ── Rolling Hurst (regime-aware trending adaptation) ──
+        # ── Rolling Hurst (regime-aware trending adaptation) — C++ accelerated ──
         spread_vals = spread.values
-        rolling_hurst = np.full(len(spread_vals), np.nan)
         hurst_window = 63
-        for j in range(hurst_window, len(spread_vals)):
-            chunk = spread_vals[j - hurst_window:j]
-            chunk = chunk[pd.notna(chunk)]
-            if len(chunk) >= 30:
-                rolling_hurst[j] = self._hurst_exponent(chunk)
+        rolling_hurst = cpp_rolling_hurst(spread_vals, hurst_window)
 
         vol_20 = spread.rolling(20).std().values
         vol_60 = spread.rolling(60).std().replace(0, np.nan).values
@@ -439,35 +436,8 @@ class TradingStrategy:
 
     @staticmethod
     def _hurst_exponent(ts: np.ndarray) -> float:
-        if len(ts) < 10:
-            return 0.5
-        lags = np.arange(2, len(ts) // 2)
-        if len(lags) < 2:
-            return 0.5
-        tau = []
-        for lag in lags:
-            chunks = len(ts) // lag
-            if chunks < 1:
-                continue
-            rs_vals = []
-            for c in range(chunks):
-                chunk = ts[c * lag:(c + 1) * lag]
-                if len(chunk) < 2:
-                    continue
-                mean = np.mean(chunk)
-                dev = chunk - mean
-                z = np.cumsum(dev)
-                r = max(z) - min(z)
-                s = np.std(chunk, ddof=1)
-                if s == 0:
-                    continue
-                rs_vals.append(r / s)
-            if rs_vals:
-                tau.append(np.mean(rs_vals))
-        if len(tau) < 2:
-            return 0.5
-        reg = np.polyfit(np.log(lags[:len(tau)]), np.log(tau), 1)
-        return float(np.clip(reg[0], 0.0, 1.0))
+        """Rescaled range (R/S) Hurst exponent — C++ accelerated."""
+        return hurst_exponent(ts)
 
     @staticmethod
     def _compute_borrow_cost(

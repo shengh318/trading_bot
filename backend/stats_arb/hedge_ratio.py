@@ -16,6 +16,13 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from backend.cpp_ext import (
+    rolling_ols as cpp_rolling_ols,
+    kalman_fit as cpp_kalman_fit,
+    estimate_ols as cpp_estimate_ols,
+)
+
+
 logger = logging.getLogger("stats_arb.hedge_ratio")
 
 
@@ -25,7 +32,7 @@ def estimate_ols(
     add_const: bool = True,
     robust: bool = False,
 ) -> float:
-    """Single source of truth for OLS hedge ratio estimation.
+    """Single source of truth for OLS hedge ratio estimation — C++ accelerated.
 
     Parameters
     ----------
@@ -57,12 +64,7 @@ def estimate_ols(
             model = HuberRegressor(fit_intercept=False)
         model.fit(b_reshaped, a_clean)
         return float(model.coef_[0])
-    if add_const:
-        b_with_const = np.column_stack([np.ones_like(b_clean), b_clean])
-        beta, _, _, _ = np.linalg.lstsq(b_with_const, a_clean, rcond=None)
-        return float(beta[1])
-    beta, _, _, _ = np.linalg.lstsq(b_clean.reshape(-1, 1), a_clean, rcond=None)
-    return float(beta[0])
+    return cpp_estimate_ols(a_clean, b_clean, add_const)
 
 
 @dataclass
@@ -121,24 +123,14 @@ class HedgeRatioEstimator:
         )
 
     def rolling_ols(self, window: int = 63) -> HedgeRatioResult:
-        a = self.prices[self.cols[0]]
-        b = self.prices[self.cols[1]]
-        betas: list[float] = []
-        intercepts: list[float] = []
-
-        for i in range(window, len(self.prices) + 1):
-            chunk_a = a.iloc[i - window : i].values
-            chunk_b = b.iloc[i - window : i].values
-            b_with_const = np.column_stack([np.ones_like(chunk_b), chunk_b])
-            beta, _, _, _ = np.linalg.lstsq(b_with_const, chunk_a, rcond=None)
-            intercepts.append(float(beta[0]))
-            betas.append(float(beta[1]))
-
+        a = self.prices[self.cols[0]].values
+        b = self.prices[self.cols[1]].values
+        betas, intercepts = cpp_rolling_ols(a, b, window)
         beta_series = pd.Series(
             betas, index=self.prices.index[window - 1 :]
         )
         return HedgeRatioResult(
-            beta=np.array(betas),
+            beta=betas,
             intercept=float(np.mean(intercepts)),
             beta_series=beta_series,
             method="rolling_ols",
@@ -167,44 +159,8 @@ class KalmanFilterHedge:
         self.delta = delta
 
     def fit(self, y: np.ndarray, x: np.ndarray) -> np.ndarray:
-        """Estimate time-varying hedge ratio (beta).
-
-        Parameters
-        ----------
-        y : np.ndarray
-            Dependent variable (price A).
-        x : np.ndarray
-            Independent variable (price B).
-
-        Returns
-        -------
-        np.ndarray
-            Time series of hedge ratio estimates.
-        """
-        n = len(y)
-        if n < 10:
-            return np.full(n, float("nan"))
-
-        y = y.astype(np.float64)
-        x = x.astype(np.float64)
-
-        theta = np.array([0.0, 0.0])  # [intercept, slope]
-        P = np.eye(2) * 100.0
-        betas = np.zeros(n)
-
-        for t in range(n):
-            phi = np.array([1.0, x[t]])
-            y_pred = theta @ phi
-            innovation = y[t] - y_pred
-
-            g = P @ phi / (self.lambda_ + phi @ P @ phi)
-            theta = theta + g * innovation
-            P = (P - np.outer(g, phi @ P)) / self.lambda_
-            P += np.eye(2) * self.delta
-
-            betas[t] = float(theta[1])
-
-        return betas
+        """Estimate time-varying hedge ratio (beta) — C++ accelerated."""
+        return cpp_kalman_fit(y, x, self.lambda_, self.delta)
 
     def fit_dataframe(
         self, prices: pd.DataFrame

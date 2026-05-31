@@ -25,7 +25,7 @@ class TestAnalyzePair:
         assert data["pair"]["ticker_b"] == "MSFT"
 
     def test_analyze_returns_error_when_analysis_fails(self):
-        with patch("backend.api.pairs_routes.PairAnalyzer.analyze") as mock_analyze:
+        with patch("backend.stats_arb.pipeline.PairAnalyzer.analyze") as mock_analyze:
             mock_analyze.side_effect = ValueError("No data for ticker")
             response = client.post("/api/pairs/analyze", json={
                 "ticker_a": "BAD",

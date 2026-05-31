@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 
+from backend.cpp_ext import hurst_exponent, rolling_ols, rolling_hurst
 from backend.strategies.base import Strategy, Signal, Portfolio
 
 logger = logging.getLogger("corr_coint_strat")
@@ -201,36 +201,27 @@ class CorrCointStrategy(Strategy):
         else:
             vol_scalar = pd.Series(1.0, index=spread.index)
 
-        # ── Rolling hedge ratio (60-day OLS) ──
+        # ── Rolling hedge ratio (60-day OLS) — C++ accelerated ──
         hr = pd.Series(self.hedge_ratio, index=spread.index)
         w = self.hedge_ratio_window
         if len(close_a) >= w:
             valid = close_a.notna() & close_b.notna() & (close_a > 0) & (close_b > 0)
             x = close_b[valid].values
             y = close_a[valid].values
+            betas, _ = rolling_ols(y, x, w)
+            n_windows = len(x) - w
             rolling_hr = pd.Series(np.nan, index=close_a.index[valid])
-            for j in range(w, len(x)):
-                x_slice = x[j - w : j]
-                y_slice = y[j - w : j]
-                xc = sm.add_constant(x_slice)
-                try:
-                    model = sm.OLS(y_slice, xc).fit()
-                    beta = float(model.params.iloc[1])
-                    rolling_hr.iloc[j] = beta if abs(beta) > 1e-10 else self.hedge_ratio
-                except Exception:
-                    rolling_hr.iloc[j] = self.hedge_ratio
+            for j in range(n_windows):
+                b = betas[j] if abs(betas[j]) > 1e-10 else self.hedge_ratio
+                rolling_hr.iloc[j + w] = b
             hr = rolling_hr.ffill().bfill().reindex(spread.index, method="ffill").fillna(self.hedge_ratio)
 
-        # ── Rolling Hurst (regime-aware trending adaptation) ──
+        # ── Rolling Hurst (regime-aware trending adaptation) — C++ accelerated ──
         spread_vals = spread.values
-        rolling_hurst = pd.Series(np.nan, index=spread.index)
         hurst_window = 63
-        for j in range(hurst_window, len(spread_vals)):
-            chunk = spread_vals[j - hurst_window:j]
-            chunk = chunk[pd.notna(chunk)]
-            if len(chunk) >= 30:
-                rolling_hurst.iloc[j] = self._hurst_exponent(chunk)
-        self._rolling_hurst = rolling_hurst
+        self._rolling_hurst = pd.Series(
+            rolling_hurst(spread_vals, hurst_window), index=spread.index,
+        )
 
         vol_20 = spread.rolling(20).std()
         vol_60 = spread.rolling(60).std().replace(0, np.nan)
@@ -445,35 +436,8 @@ class CorrCointStrategy(Strategy):
 
     @staticmethod
     def _hurst_exponent(ts: np.ndarray) -> float:
-        if len(ts) < 10:
-            return 0.5
-        lags = np.arange(2, len(ts) // 2)
-        if len(lags) < 2:
-            return 0.5
-        tau = []
-        for lag in lags:
-            chunks = len(ts) // lag
-            if chunks < 1:
-                continue
-            rs_vals = []
-            for c in range(chunks):
-                chunk = ts[c * lag:(c + 1) * lag]
-                if len(chunk) < 2:
-                    continue
-                mean = np.mean(chunk)
-                dev = chunk - mean
-                z = np.cumsum(dev)
-                r = max(z) - min(z)
-                s = np.std(chunk, ddof=1)
-                if s == 0:
-                    continue
-                rs_vals.append(r / s)
-            if rs_vals:
-                tau.append(np.mean(rs_vals))
-        if len(tau) < 2:
-            return 0.5
-        reg = np.polyfit(np.log(lags[:len(tau)]), np.log(tau), 1)
-        return float(np.clip(reg[0], 0.0, 1.0))
+        """Rescaled range (R/S) Hurst exponent — C++ accelerated."""
+        return hurst_exponent(ts)
 
     def get_state(self) -> dict[str, Any]:
         return {

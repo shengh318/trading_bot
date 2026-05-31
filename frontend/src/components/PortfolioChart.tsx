@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useRef, useState, useCallback } from "react";
 import { createChart, ColorType, type IChartApi, type ISeriesApi, type SeriesMarker, type Time } from "lightweight-charts";
 import { useTheme } from "../theme/ThemeContext";
 
@@ -19,7 +19,7 @@ interface Props {
   initialCash?: number;
 }
 
-export default function PortfolioChart({ data, markers = [], height = 350, initialCash }: Props) {
+function PortfolioChartInner({ data, markers = [], height = 350, initialCash }: Props) {
   const { colors } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -84,7 +84,9 @@ export default function PortfolioChart({ data, markers = [], height = 350, initi
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-  }, [height, colors, initialCash]);
+  }, [height, colors.bg, colors.text, colors.chart.gridColor, colors.chart.borderColor,
+      colors.chart.lineColor, colors.chart.topColor, colors.chart.bottomColor,
+      colors.positive, colors.negative, initialCash]);
 
   useEffect(() => {
     if (!seriesRef.current) return;
@@ -153,3 +155,5 @@ export default function PortfolioChart({ data, markers = [], height = 350, initi
     </div>
   );
 }
+
+export default memo(PortfolioChartInner);

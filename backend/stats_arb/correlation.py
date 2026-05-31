@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from backend.cpp_ext import rolling_slope
+
 from .config import CORRELATION_WINDOWS
 
 logger = logging.getLogger("stats_arb.correlation")
@@ -135,11 +137,9 @@ class CorrelationAnalyzer:
             x = np.arange(len(corr_series))
             overall_slope = float(np.polyfit(x, corr_series.values, 1)[0])
 
-            # Rolling slope (63d window)
-            rolling_slope = corr_series.rolling(63).apply(
-                lambda s: np.polyfit(np.arange(len(s)), s, 1)[0] if len(s) == 63 else np.nan,
-                raw=False,
-            ).dropna()
+            # Rolling slope (63d window) — C++ accelerated (O(1) per step)
+            roll_slope_arr = rolling_slope(corr_series.values, 63)
+            rolling_slope_series = pd.Series(roll_slope_arr, index=corr_series.index).dropna()
 
             # Threshold crossings (replaces regime_changes)
             threshold_crossings = {
@@ -176,7 +176,7 @@ class CorrelationAnalyzer:
                 correlation_collapse=correlation_collapse,
                 max_correlation_drawdown=max_correlation_drawdown,
                 stability_score=stability_score,
-                rolling_slope_series=rolling_slope,
+                rolling_slope_series=rolling_slope_series,
                 series=corr_series,
             )
 

@@ -21,6 +21,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+
+from backend.cpp_ext import triple_barrier_label
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import confusion_matrix
 from sklearn.neural_network import MLPClassifier
@@ -159,30 +161,10 @@ def _triple_barrier_label(
     pct: float = 0.02,
     max_bars: int = 10,
 ) -> pd.Series:
-    """Triple-barrier labeling (de Prado).
-
-    1 = profit target hit first,
-    0 = stop-loss hit first,
-    0 = max holding period expired.
-    """
-    close = df["close"].values
-    high = df["high"].values
-    low = df["low"].values
-    n = len(close)
-    labels = np.zeros(n, dtype=int)
-
-    for i in range(n - 1):
-        entry = close[i]
-        tp = entry * (1 + pct)
-        sl = entry * (1 - pct)
-        end = min(i + max_bars + 1, n)
-        for j in range(i + 1, end):
-            if high[j] >= tp:
-                labels[i] = 1
-                break
-            if low[j] <= sl:
-                labels[i] = 0
-                break
+    """Triple-barrier labeling (de Prado) — C++ accelerated."""
+    labels = triple_barrier_label(
+        df["close"].values, df["high"].values, df["low"].values, pct, max_bars,
+    )
     return pd.Series(labels, index=df.index)
 
 
@@ -340,25 +322,34 @@ def backtest_model(
         cost_basis[sym] = 0.0
         local_idx[sym] = -1
 
-    timestamps = sorted(set.union(*[set(d.index) for d in sym_data.values()]))
+    close_arrs: dict[str, np.ndarray] = {}
+    feat_arrs: dict[str, np.ndarray] = {}
+    feat_idx: dict[str, np.ndarray] = {}
+    ts_sets: dict[str, set] = {}
+    for sym, sd in sym_data.items():
+        close_arrs[sym] = sd["close"].values
+        feat_arrs[sym] = sd[feature_cols].values
+        feat_idx[sym] = np.arange(len(sd))
+        ts_sets[sym] = set(sd.index)
+
+    timestamps = sorted(set.union(*ts_sets.values()))
     all_trades: list[dict] = []
     snapshots: list[float] = []
 
     for ts in timestamps:
         for sym in sorted(sym_data.keys()):
-            if ts not in sym_data[sym].index:
+            if ts not in ts_sets[sym]:
                 continue
             local_idx[sym] += 1
             i = local_idx[sym]
-            row = sym_data[sym].iloc[i]
-            price = float(row["close"])
+            price = float(close_arrs[sym][i])
 
-            feat_df = pd.DataFrame([row[feature_cols]])
-            if feat_df.isna().any(axis=None):
+            feat_row = feat_arrs[sym][i]
+            if np.any(np.isnan(feat_row)):
                 signal = Signal.HOLD
                 prob_up = 0.5
             else:
-                proba = model.predict_proba(feat_df)[0]
+                proba = model.predict_proba(feat_row.reshape(1, -1))[0]
                 if len(proba) >= 2:
                     prob_up = proba[1]
                     if prob_up >= confidence_threshold:
@@ -422,9 +413,9 @@ def backtest_model(
                 all_trades.append({"side": "sell", "qty": qty, "price": price, "pnl": pnl})
 
         equity = portfolio.cash + sum(
-            portfolio.positions.get(sym, 0) * float(sym_data[sym].loc[ts, "close"])
+            portfolio.positions.get(sym, 0) * close_arrs[sym][local_idx[sym]]
             for sym in sym_data
-            if ts in sym_data[sym].index and portfolio.positions.get(sym, 0) > 0
+            if local_idx[sym] >= 0 and portfolio.positions.get(sym, 0) > 0
         )
         snapshots.append(equity)
 

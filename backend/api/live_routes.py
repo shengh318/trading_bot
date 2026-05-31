@@ -1,12 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.engine.live import get_live_engine
+# LiveEngine is lazy-imported inside route handlers for fast startup
 
 live_router = APIRouter()
 
 
 @live_router.get("/api/live/status")
 def live_status():
+    from backend.engine.live import get_live_engine
     engine = get_live_engine()
     if engine is None or not engine.running:
         return {
@@ -37,6 +38,7 @@ def live_status():
 
 @live_router.post("/api/live/stop")
 def live_stop():
+    from backend.engine.live import get_live_engine
     engine = get_live_engine()
     if engine and engine.running:
         engine.stop()

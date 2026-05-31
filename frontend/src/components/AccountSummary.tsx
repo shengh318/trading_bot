@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useTheme } from "../theme/ThemeContext";
 import type { AccountSummary as AccountSummaryType } from "../api/client";
 
@@ -5,7 +6,7 @@ interface Props {
   summary: AccountSummaryType | null;
 }
 
-export default function AccountSummary({ summary }: Props) {
+function AccountSummary({ summary }: Props) {
   const { colors } = useTheme();
   if (!summary) return null;
   return (
@@ -47,3 +48,6 @@ export default function AccountSummary({ summary }: Props) {
     </div>
   );
 }
+
+export default memo(AccountSummary);
+

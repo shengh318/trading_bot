@@ -52,9 +52,10 @@ class TestDataLoader:
     def test_load_bars_raises_on_empty_data(self, mock_alpaca_client):
         from datetime import datetime
         mock_alpaca_client.return_value.get_stock_bars.return_value.df = pd.DataFrame()
-        dl = DataLoader()
-        with pytest.raises(ValueError, match="No data returned"):
-            dl.load_bars("AAPL", datetime(2025, 1, 1), datetime(2025, 1, 31), use_cache=False)
+        with patch("backend.data.loader.yf.download", return_value=pd.DataFrame()):
+            dl = DataLoader()
+            with pytest.raises(ValueError, match="No data returned"):
+                dl.load_bars("AAPL", datetime(2025, 1, 1), datetime(2025, 1, 31), use_cache=False)
 
     def test_clear_cache(self, mock_alpaca_client):
         from datetime import datetime

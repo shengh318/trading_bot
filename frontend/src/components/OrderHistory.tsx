@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useTheme } from "../theme/ThemeContext";
 import type { Order } from "../api/client";
 
@@ -5,7 +6,7 @@ interface Props {
   orders: Order[];
 }
 
-export default function OrderHistory({ orders }: Props) {
+function OrderHistory({ orders }: Props) {
   const { colors } = useTheme();
 
   const cellStyle: React.CSSProperties = {
@@ -79,3 +80,6 @@ export default function OrderHistory({ orders }: Props) {
     </div>
   );
 }
+
+export default memo(OrderHistory);
+

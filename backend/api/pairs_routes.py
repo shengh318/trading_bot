@@ -22,10 +22,7 @@ from backend.api.models import (
     WalkForwardMetrics,
     WFBacktestMetricsModel,
 )
-from backend.stats_arb.cointegration import CointegrationTester
-from backend.stats_arb.data import DataManager
-from backend.stats_arb.pipeline import PairAnalyzer
-from backend.stats_arb.ranking import PairRanker
+# stats_arb modules are lazy-imported inside route functions for fast startup
 
 logger = logging.getLogger("pairs_api")
 
@@ -214,6 +211,7 @@ def _empty_pair(ticker_a: str, ticker_b: str) -> PairData:
 
 @router.post("/api/pairs/analyze", response_model=PairAnalysisResponse)
 def analyze_pair(req: PairAnalysisRequest):
+    from backend.stats_arb.pipeline import PairAnalyzer
     end = req.end or datetime.today().strftime("%Y-%m-%d")
     analyzer = PairAnalyzer(
         req.ticker_a.upper(),
@@ -235,6 +233,8 @@ def analyze_pair(req: PairAnalysisRequest):
 
 @router.post("/api/pairs/rank", response_model=PairRankResponse)
 def rank_pairs(req: PairRankRequest):
+    from backend.stats_arb.pipeline import PairAnalyzer
+    from backend.stats_arb.ranking import PairRanker
     end = req.end or datetime.today().strftime("%Y-%m-%d")
     results = []
     for pair in req.pairs:
@@ -268,6 +268,8 @@ def cointegration_heatmap(req: HeatmapRequest):
     try:
         import numpy as np
         from itertools import combinations
+        from backend.stats_arb.data import DataManager
+        from backend.stats_arb.cointegration import CointegrationTester
         matrix = {}
         pair_list = list(combinations(tickers, 2))
         for a, b in pair_list:

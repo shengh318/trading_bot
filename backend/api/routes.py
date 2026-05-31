@@ -14,8 +14,7 @@ from backend.api.models import (
     StrategyInfo,
     db_row_to_backtest_run_response,
 )
-from backend.backtest.engine import BacktestEngine
-from backend.data.loader import DataLoader
+# BacktestEngine and DataLoader are lazy-imported inside route handlers
 from backend.strategies.registry import get_strategy, list_strategies
 
 router = APIRouter()
@@ -101,6 +100,8 @@ def delete_backtest_run(run_id: int):
 
 @router.post("/api/backtest/run", response_model=BacktestRunResponse)
 def run_backtest(req: BacktestRunRequest):
+    from backend.backtest.engine import BacktestEngine
+    from backend.data.loader import DataLoader
     db = get_db()
 
     try:

@@ -23,6 +23,7 @@
 | Find pairs (custom + save) | `.venv\Scripts\python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` | `.venv/bin/python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` |
 | CorrCointStrategy tests | `.venv\Scripts\python -m pytest backend\tests\test_corr_coint_strat.py -v` | `.venv/bin/python -m pytest backend/tests/test_corr_coint_strat.py -v` |
 | CorrCointStrategy discovery | `.venv\Scripts\python -m backend.stats_arb.cli --auto-discover NVDA,AMD,INTC,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AVGO,CSCO,JPM,GS,KO,PEP --no-parallel --no-plots --output-md discover.md` | `.venv/bin/python -m backend.stats_arb.cli --auto-discover NVDA,AMD,INTC,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AVGO,CSCO,JPM,GS,KO,PEP --no-parallel --no-plots --output-md discover.md` |
+| Build C++ extension | `cmd /c "call `"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat`" && cd backend\cpp_ext && ..\..\.venv\Scripts\python setup.py build_ext --inplace"` | `cd backend/cpp_ext && python setup.py build_ext --inplace` |
 
 ## Project Structure
 
@@ -44,7 +45,8 @@ backend/
 │   ├── registry.py          list_strategies(), get_strategy(name) — auto-discovers via STRATEGY_REGISTRY
 │   ├── sma_crossover.py     SmaCrossover — buy when short SMA > long SMA, sell on cross below
 │   ├── simple_strat_1.py    SimpleStrat1 — mean reversion DCA, buys on drops from open, sells green days
-│   └── ml_strategy.py       MLStrategy — loads trained .joblib model, computes 38 features, buy/sell/hold
+│   ├── ml_strategy.py       MLStrategy — loads trained .joblib model, computes 38 features, buy/sell/hold
+│   └── corr_coint_strat.py  CorrCointStrategy — correlation + cointegration mean-reversion pairs strategy
 ├── ml/                      ML training pipeline
 │   ├── features.py          compute_features(df) — 38 indicators (SMA, EMA, RSI, MACD, BB, ATR, etc.)
 │   ├── model.py             save_model/load_model/list_models/delete_model — versioned .joblib + metadata
@@ -62,25 +64,26 @@ backend/
 │   ├── loader.py            DataLoader — yfinance fallback/cache, Alpaca primary, dividend fetching
 │   ├── store.py             Database — SQLite CRUD for backtest_runs, snapshots, positions, orders
 │   └── cache/               Parquet files for bars and dividends
-├── stats_arb/               Statistical Arbitrage Research Framework (pairs trading)
+├── stats_arb/               Statistical Arbitrage Research Framework (pairs trading, 17 files)
+│   ├── __init__.py           Package exports
 │   ├── config.py            Defaults: windows, significance, z-entry/exit, fees, walk-forward params
 │   ├── data.py              DataManager — yfinance download + caching for pairs
-│   ├── correlation.py       CorrelationAnalyzer — rolling windows, stability score, regime changes, correlation collapse
+│   ├── correlation.py       CorrelationAnalyzer — rolling windows, stability score, threshold crossings, correlation collapse, overall_slope, max_correlation_drawdown
 │   ├── cointegration.py     CointegrationTester (Engle-Granger) + JohansenTester
-│   ├── hedge_ratio.py       HedgeRatioEstimator — OLS, rolling OLS, KalmanFilterHedge
-│   ├── spread.py            SpreadAnalyzer — half-life, Hurst, ADF, OU process, autocorr, variance ratio
+│   ├── hedge_ratio.py       HedgeRatioEstimator — OLS, rolling OLS, KalmanFilterHedge + centralized estimate_ols()
+│   ├── spread.py            SpreadAnalyzer — half-life, Hurst, ADF, OU process, autocorr, variance ratio, variance explosion detection
 │   ├── regime.py            RegimeDetector — Hurst, volatility, VIX, CUSUM, Chow, Bai-Perron structural breaks
-│   ├── walk_forward.py      WalkForwardValidator, PurgedWalkForwardValidator, WalkForwardBacktest
-│   ├── strategy.py          TradingStrategy — spread z-score mean reversion with dynamic sizing
-│   ├── backtest.py          BacktestEngine — P&L, equity curve, Sharpe, Sortino, drawdown, turnover
-│   ├── ranking.py           PairRanker — Bonferroni + Benjamini-Hochberg multiple comparison correction
+│   ├── walk_forward.py      WalkForwardValidator, PurgedWalkForwardValidator, WalkForwardBacktest, WFBacktestFold/Result
+│   ├── strategy.py          TradingStrategy — spread z-score mean reversion with dynamic sizing, expanding-window z-score, structural break exit
+│   ├── backtest.py          BacktestEngine — P&L, equity curve, Sharpe, Sortino, drawdown, turnover, benchmark comparison
+│   ├── ranking.py           PairRanker — Bonferroni + Benjamini-Hochberg multiple comparison correction, break penalty, stability scoring
 │   ├── ml_models.py         SpreadPredictor — RF/GBT/XGB regression for spread prediction
 │   ├── pipeline.py          PairAnalyzer — orchestrates all phases: data→correlation→coint→spread→regime→WF→strategy→backtest→(ML)
 │   ├── cli.py               CLI entry point: --pair, --pairs-file, --heatmap, --rank, --ml, --purged, --json
 │   ├── discover.py          Auto-discovery: screens all pairs via EG cointegration, full pipeline on top candidates, ranks, filters by profitability, outputs table + JSON + Markdown
 │   └── visualization.py     Visualizer — spread/zscore/cumulative/heatmap plots via matplotlib+seaborn
 ├── find_pairs.py             Automated pairs discovery wrapper (correlation + cointegration + markdown report)
-├── tests/                   277 pytest tests (26 files)
+├── tests/                   50 pytest test files (742 `def test_`)
 │   ├── test_backtest_engine.py        (12)  — single + multi-symbol, streaming, dividend
 │   ├── test_backtest_metrics.py       (11)  — Sharpe, drawdown, win rate calculations
 │   ├── test_api_routes.py             (17)  — strategies, backtest CRUD, portfolio
@@ -89,15 +92,27 @@ backend/
 │   ├── test_loader.py                 (5)   — data fetching + caching
 │   ├── test_config.py                 (4)   — config validation
 │   ├── test_api.py                    (4)   — health check
-│   ├── test_bugs_*.py                 (8 files, 120) — regression tests for bugs 1-22
+│   ├── test_alpaca_routes.py          (12)  — Alpaca API routes
+│   ├── test_corr_coint_strat.py       (37)  — CorrCointStrategy entry/exit, cooldown, correlation gate, stop-loss
+│   ├── test_correlation.py            (35)  — correlation API endpoint
+│   ├── test_stats_arb.py              (18)  — cointegration, ranking, strategy, walk-forward
+│   ├── test_ml_routes.py              (14)  — ML retrain API, status polling
+│   ├── test_pairs_routes.py           (19)  — pairs API endpoints
+│   ├── test_live_routes.py            (8)   — live engine API
+│   ├── test_integration.py            (19)  — cross-module integration
+│   ├── test_math_audit.py             (22)  — numerical edge-case audits
+│   ├── test_audit_*.py                (3 files, 91) — stats-arb, backtest, features audits
+│   ├── test_numerical_*.py            (9 files, 191) — numerical tests: engine, metrics, features, correlation, hedge_ratio, spread, walk_forward, ranking, strategies, strategy_statsarb, backtest_statsarb
+│   ├── test_bugs_*.py                 (8 files, ~120) — regression tests for bugs 1-22
+│   ├── test_bug_*.py                  (6 files, 19) — individual bug regression tests
+│   ├── test_bug_features_rsi_mfi.py   (7)  — feature edge case for RSI/MFI
+│   ├── test_bug_multisymbol_equity.py (1)  — multi-symbol equity curve alignment
+│   ├── test_bug_profit_factor_inf.py  (3)  — profit factor division by zero
 │   ├── test_bug_backtest_sell_portion.py (3)  — stale qty on SELL (UnboundLocalError)
 │   ├── test_bug_backtest_zero_price.py   (3)  — ZeroDivisionError on zero price
 │   ├── test_bug_metrics_zero_cash.py     (2)  — inf total_return_pct at zero cash
 │   ├── test_bug_ml_auc.py                (3)  — AUC always 0.0 from boolean → scaler
-│   ├── test_bug_spread_zscore.py         (3)  — inf/nan z-scores on constant spread
-│   ├── test_correlation.py            (35)  — correlation API endpoint
-│   ├── test_stats_arb.py              (18)  — cointegration, ranking, strategy, walk-forward
-│   └── conftest.py                    — pytest fixtures
+│   └── test_bug_spread_zscore.py         (3)  — inf/nan z-scores on constant spread
 ├── config.py                 Settings: ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_PAPER, DB_PATH, validate_config()
 └── requirements.txt          fastapi, uvicorn, alpaca-py, pandas, numpy, scikit-learn, xgboost, lightgbm, yfinance, statsmodels, matplotlib, seaborn, scipy, pytest, httpx, websockets, pyarrow
 ```
@@ -135,7 +150,7 @@ frontend/
     │   └── Clock.tsx               Live clock (HH:MM:SS AM/PM + date), updates every 1s
     └── theme/
         └── ThemeContext.tsx        ThemeProvider — dark/light, system preference detection, full ThemeColors interface
-    Tests: 11 files, 79 `it()` calls total
+    Tests: 17 files, 133 `it()` calls total
 ```
 
 ## Key Architecture
@@ -169,7 +184,7 @@ frontend/
 ### ML Pipeline (`backend/ml/`)
 - **Features** (`features.py:24`): `compute_features(df)` → 38 columns: SMA(5/10/20/50/200), EMA(12/26), RSI(14), MACD, BB upper/lower/width/%, ATR(14), volume SMA(5/21), volume delta, ROC(1/5/21), log returns (1/5/21), volatility (5/21), rolling max/min z-score, close/corr with SPY
 - **Model** (`model.py`): `save_model()` — versioned .joblib + metadata; `load_model(name, version)`; `list_models()`; `delete_model()`
-- **Train** (`train.py`): 1573 lines — CLI with argparse, downloads yfinance, computes features, trains 6 model types, grid search, walk-forward, stacking, multi-horizon, regime-aware, Kelly, triple barrier, meta-labeling, pruning, regularization, embargo, baseline comparison, backtest
+- **Train** (`train.py`): 1573 lines — CLI with argparse, downloads yfinance, computes features, trains 6 model types (rf/gbt/xgb/lgb/sgd/mlp), grid search (incl. sgd/mlp params), walk-forward, stacking, multi-horizon, regime-aware, Kelly, triple barrier, meta-labeling, pruning, regularization, embargo, baseline comparison, backtest
 - **Stacking** (`stacking.py`): `StackingEnsemble`, `MetaLabeledModel`, `MultiHorizonEnsemble`, `RegimeAwareModel`
 - **Auto-optimize** (`auto_optimize.py`): 10-step forward selection (baseline → grid → WF → all types → stacking → multi-horizon → regime → context → Kelly → triple-barrier), then Phase 2 champion training with `--beat-baselines`
 
@@ -190,7 +205,7 @@ frontend/
 
 ## Tests Summary
 
-### Backend: 277 tests across 26 files
+### Backend: 50 test files with 742 `def test_` calls
 | File | Tests | What it covers |
 |------|-------|----------------|
 | `test_api_routes.py` | 17 | Strategies, backtest CRUD, portfolio, error cases |
@@ -201,19 +216,29 @@ frontend/
 | `test_loader.py` | 5 | Data fetching, caching, missing data handling |
 | `test_config.py` | 4 | Config validation, missing keys |
 | `test_api.py` | 4 | Health endpoint |
+| `test_alpaca_routes.py` | 12 | Alpaca API routes |
+| `test_corr_coint_strat.py` | 37 | CorrCointStrategy entry/exit, cooldown, correlation gate, stop-loss |
 | `test_correlation.py` | 35 | _safe helper, API endpoint, model validation |
 | `test_stats_arb.py` | 18 | Cointegration, ranking corrections, strategy, WF leakage |
-| `test_bugs_*.py` (8 files) | 120 | Regression tests for bugs 1-22 across all modules |
+| `test_ml_routes.py` | 14 | ML retrain API, status polling |
+| `test_pairs_routes.py` | 19 | Pairs API endpoints |
+| `test_live_routes.py` | 8 | Live engine API |
+| `test_integration.py` | 19 | Cross-module integration |
+| `test_math_audit.py` | 22 | Numerical edge-case audits |
+| `test_audit_*.py` (3 files) | 91 | Stats-arb, backtest, features audits |
+| `test_numerical_*.py` (9 files) | 191 | Numerical tests: engine, metrics, features, correlation, hedge_ratio, spread, walk_forward, ranking, strategies, strategy_statsarb, backtest_statsarb |
+| `test_bugs_*.py` (8 files) | ~120 | Regression tests for bugs 1-22 across all modules |
+| `test_bug_*.py` (6 files) | 19 | Individual bug regression tests |
+| `test_bug_features_rsi_mfi.py` | 7 | Feature edge case for RSI/MFI |
+| `test_bug_multisymbol_equity.py` | 1 | Multi-symbol equity curve alignment |
+| `test_bug_profit_factor_inf.py` | 3 | Profit factor division by zero |
 | `test_bug_backtest_sell_portion.py` | 3 | Stale qty on SELL (UnboundLocalError) |
 | `test_bug_backtest_zero_price.py` | 3 | ZeroDivisionError on zero price |
 | `test_bug_metrics_zero_cash.py` | 2 | inf total_return_pct at zero cash |
 | `test_bug_ml_auc.py` | 3 | AUC always 0.0 from boolean → scaler |
 | `test_bug_spread_zscore.py` | 3 | inf/nan z-scores on constant spread |
-| `test_corr_coint_strat.py` | 21 | CorrCointStrategy: entry/exit, cooldown, correlation gate, partial exit, stop-loss, edge cases |
-| `test_correlation.py` | 35 | Correlation API endpoint |
-| `test_stats_arb.py` | 18 | Cointegration, ranking, strategy, walk-forward |
 
-### Frontend: 79 `it()` calls across 11 test files
+### Frontend: 133 `it()` calls across 17 test files
 | File | Tests | What it covers |
 |------|-------|----------------|
 | `App.test.tsx` | 4 | Rendering, tabs, tab switching |
@@ -223,10 +248,16 @@ frontend/
 | `PositionsTable.test.tsx` | 3 | Empty state, rows, P&L coloring |
 | `OrderHistory.test.tsx` | 3 | Empty state, rows, buy/sell coloring |
 | `AccountSummary.test.tsx` | 3 | Null, fields, negative P&L |
+| `Clock.test.tsx` | 7 | Rendering, time updates, formatting |
+| `PortfolioChart.test.tsx` | 7 | Rendering, series, markers |
+| `Correlation.test.tsx` | 9 | Correlation page rendering, inputs |
+| `Live.test.tsx` | 11 | Live page rendering, start/stop |
+| `Pairs.test.tsx` | 12 | Pairs page rendering, analysis |
+| `ThemeContext.test.tsx` | 7 | Theme toggle, dark/light mode |
 | `Backtest.bugs.test.tsx` | 4 | Default cash, callback deps, param validation |
 | `Dashboard.bugs.test.tsx` | 3 | Alpaca error, loading, fallback |
 | `Strategies.test.tsx` | 5 | Rendering, selection, param changes, API error handling |
-| `MlLab.bugs.test.tsx` | 3 | Polling name mismatch, walk_forward type, interval cleanup |
+| `MlLab.bugs.test.tsx` | 4 | Polling name mismatch, walk_forward type, interval cleanup |
 
 ## Data Flow Patterns
 

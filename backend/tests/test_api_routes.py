@@ -140,7 +140,7 @@ class TestBacktestRunPost:
         assert response.status_code == 400
         assert "Unknown strategy" in response.json()["detail"]
 
-    @patch("backend.api.routes.DataLoader")
+    @patch("backend.data.loader.DataLoader")
     def test_runs_backtest_and_saves_to_db(self, mock_loader_cls, api_db):
         # Prices dip then rise then fall — triggers SMA crossover (buy) then crossunder (sell)
         closes = [100.0, 99.0, 98.0, 97.0, 98.0, 99.0, 100.0, 101.0, 102.0, 97.0]
@@ -172,7 +172,7 @@ class TestBacktestRunPost:
         snapshots = api_db.get_backtest_snapshots(data["id"])
         assert len(snapshots) == len(closes)
 
-    @patch("backend.api.routes.DataLoader")
+    @patch("backend.data.loader.DataLoader")
     def test_backtest_run_returns_metrics(self, mock_loader_cls, api_db):
         dates = pd.date_range("2025-01-01", periods=5, freq="D")
         mock_df = pd.DataFrame({

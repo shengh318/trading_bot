@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useTheme } from "../theme/ThemeContext";
 import type { Position } from "../api/client";
 
@@ -5,7 +6,7 @@ interface Props {
   positions: Position[];
 }
 
-export default function PositionsTable({ positions }: Props) {
+function PositionsTable({ positions }: Props) {
   const { colors } = useTheme();
 
   const cellStyle: React.CSSProperties = {
@@ -67,3 +68,6 @@ export default function PositionsTable({ positions }: Props) {
     </div>
   );
 }
+
+export default memo(PositionsTable);
+

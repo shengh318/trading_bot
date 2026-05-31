@@ -1,6 +1,7 @@
 """ML training API — list, retrain, and manage models."""
 
 import json
+import math
 import os
 import signal
 import subprocess
@@ -8,9 +9,6 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.api.models import (
@@ -20,7 +18,7 @@ from backend.api.models import (
     MlRetrainRequest,
     MlRetrainResponse,
 )
-from backend.ml.model import delete_model, list_models, load_model
+# ml.model functions are lazy-imported inside route handlers
 
 router = APIRouter()
 
@@ -107,12 +105,14 @@ def _build_cmd(req: MlRetrainRequest) -> list[str]:
 @router.get("/api/ml/models", response_model=list[MlModelInfo])
 def get_ml_models():
     """List all trained models with version info."""
+    from backend.ml.model import list_models
     return list_models()
 
 
 @router.get("/api/ml/models/{name}", response_model=MlModelInfo)
 def get_ml_model(name: str):
     """Get info for the latest version of a model."""
+    from backend.ml.model import list_models
     models = list_models()
     for m in models:
         if m["name"] == name:
@@ -151,6 +151,7 @@ def retrain_model(req: MlRetrainRequest):
 @router.get("/api/ml/retrain/status/{name}", response_model=MlRetrainResponse)
 def retrain_status(name: str):
     """Check if training is still running for a given model name."""
+    from backend.ml.model import list_models
     pid = _active_pids.get(name)
     if pid is None:
         models = list_models()
@@ -171,6 +172,7 @@ def retrain_status(name: str):
 @router.delete("/api/ml/models/{name}")
 def delete_ml_model(name: str, version: int | None = None):
     """Delete a model, optionally a specific version."""
+    from backend.ml.model import delete_model
     delete_model(name, version=version)
     return {"status": "deleted", "name": name, "version": version}
 
@@ -183,7 +185,7 @@ def _safe(val: float, default: float = 0.0) -> float:
     if val is None:
         return default
     try:
-        return val if np.isfinite(val) else default
+        return val if math.isfinite(val) else default
     except (TypeError, ValueError):
         return default
 
@@ -196,6 +198,8 @@ def get_correlation_data(
     windows: str = Query("20,60,120", description="Comma-separated rolling windows"),
 ):
     """Download two symbols and compute rolling correlations + summary statistics."""
+    import yfinance as yf
+    import pandas as pd
     try:
         window_list = [int(w.strip()) for w in windows.split(",") if w.strip()]
     except ValueError:
@@ -274,7 +278,7 @@ def get_correlation_data(
     if len(in_sample) > 10 and len(out_sample) > 10:
         r_in, _ = pearsonr(in_sample.iloc[:, 0].values, in_sample.iloc[:, 1].values)
         r_out, _ = pearsonr(out_sample.iloc[:, 0].values, out_sample.iloc[:, 1].values)
-        if np.isfinite(r_in) and np.isfinite(r_out):
+        if math.isfinite(r_in) and math.isfinite(r_out):
             oos_drop = round(abs(r_in - r_out), 4)
 
     statistics = {

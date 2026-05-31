@@ -59,7 +59,7 @@ class TestWebSocketReplay:
 
 
 class TestWebSocketRun:
-    @patch("backend.api.websocket.DataLoader")
+    @patch("backend.data.loader.DataLoader")
     def test_run_streams_bars_and_completes(self, mock_loader_cls, api_db):
         dates = pd.date_range("2025-01-01", periods=5, freq="D")
         mock_df = pd.DataFrame({

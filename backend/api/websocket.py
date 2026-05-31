@@ -2,18 +2,17 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-import pandas as pd
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from backend.api.deps import get_db
-from backend.backtest.engine import BacktestEngine, MultiSymbolBacktestEngine
-from backend.backtest.metrics import calculate_metrics
-from backend.data.loader import DataLoader
 from backend.strategies.registry import get_strategy
 
+# Heavy imports (pandas, alpaca, backtest engine, data loader) are lazy-imported
+# inside handler functions for fast startup.
 
-def _parse_timeframe(tf_str: str) -> TimeFrame:
+
+def _parse_timeframe(tf_str: str):
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
     tf_str = tf_str.strip()
     m = re.match(r"^(\d+)\s*(Min|Hour|Day|Week|Month)$", tf_str, re.IGNORECASE)
     if not m:
@@ -60,29 +59,40 @@ async def backtest_websocket(websocket: WebSocket):
 
 
 async def _handle_run(websocket: WebSocket, data: dict) -> None:
+    import pandas as pd
+    from backend.data.loader import DataLoader
+    from backend.backtest.engine import MultiSymbolBacktestEngine
+    from backend.backtest.metrics import calculate_metrics
+    print(f"[ws backtest] _handle_run: strategy={data.get('strategy_name')} symbols={data.get('symbols')} timeframe={data.get('timeframe')} start={data.get('start_date')} end={data.get('end_date')}")
     loader = DataLoader()
     end = datetime.fromisoformat(data["end_date"]) if data.get("end_date") else (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1))
     start = datetime.fromisoformat(data["start_date"])
 
     symbols: list[str] = data.get("symbols") or [data["symbol"]]
     timeframe = _parse_timeframe(data.get("timeframe", "1Day"))
+    print(f"[ws backtest] parsed timeframe={timeframe} amount={timeframe.amount} unit={timeframe.unit}")
 
     data_frames: dict[str, pd.DataFrame] = {}
     div_frames: dict[str, pd.DataFrame] = {}
     for sym in symbols:
+        print(f"[ws backtest] loading bars for {sym}...")
         data_frames[sym] = loader.load_bars(
             symbol=sym,
             start=start,
             end=end,
             timeframe=timeframe,
         )
+        print(f"[ws backtest] {sym} bars: {len(data_frames[sym])} rows, columns={list(data_frames[sym].columns)}")
+        print(f"[ws backtest] loading dividends for {sym}...")
         div_frames[sym] = loader.load_dividends(
             symbol=sym,
             start=start,
             end=end,
         )
+        print(f"[ws backtest] {sym} dividends: {len(div_frames[sym])} rows")
 
     strategy_cls = get_strategy(data["strategy_name"], data.get("parameters")).__class__
+    print(f"[ws backtest] strategy class: {strategy_cls.__name__}")
 
     engine = MultiSymbolBacktestEngine(
         data_frames, strategy_cls,
@@ -94,7 +104,12 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
     trades_batch: list[dict] = []
     snapshots_batch: list[dict] = []
 
+    print(f"[ws backtest] starting engine stream...")
+    stream_count = 0
     for event in engine.stream():
+        stream_count += 1
+        if stream_count == 1:
+            print(f"[ws backtest] first bar streaming")
         bar_trades = event.get("trade", [])
         msg: dict = {
             "type": "bar",
@@ -110,6 +125,7 @@ async def _handle_run(websocket: WebSocket, data: dict) -> None:
         trades_batch.extend(bar_trades if isinstance(bar_trades, list) else [bar_trades] if bar_trades else [])
         snapshots_batch.append(event["snapshot"])
 
+    print(f"[ws backtest] stream complete: {stream_count} bars, {len(trades_batch)} trades")
     db = get_db()
     initial_cash = float(data.get("initial_cash", 10000))
 

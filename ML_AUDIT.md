@@ -411,16 +411,23 @@ If context data download fails for any reason (network, API error, invalid symbo
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| Critical | 5 | 0 |
+| Critical | 5 | 3 (C2, C4, C5) |
 | High     | 7 | 1 (H7) |
 | Medium   | 10 | 1 (M7) |
 | Low      | 12 | 1 (L12) |
-| **Total**| **34** | **3** |
+| **Total**| **34** | **6** |
 
-Most impactful bugs to fix first:
-1. **C1** — Online learning trains on wrong target for multi-horizon models
-2. **C2** — `list_models()` returns mangled model names (affects UI)
-3. **C4** — Subprocess deadlock in retrain API (can hang uvicorn)
-4. **C5** — Grid search ignores SGD/MLP-specific params
-5. **H4** — Context data download may silently fail with timezone issues
-6. ~~**H7**~~ ✅ — Division by zero in feature computation produces NaN/inf features *(resolved)*
+### Resolved since original audit
+| Bug | Fix |
+|-----|-----|
+| **C2** — `list_models()` returns mangled names | `list_models()` (model.py:136) now properly parses `_v` suffix from `_metadata` stem, skipping latest-symlink files and correctly extracting name |
+| **C4** — Subprocess pipe deadlock | ml_routes.py now uses `stdout=open(log_file, "w")` instead of `subprocess.PIPE`, eliminating deadlock risk |
+| **C5** — Grid search ignores SGD/MLP params | `_grid_params()` (train.py:993-1011) now has dedicated parameter grids for `sgd` (penalty/alpha/lr) and `mlp` (hidden_layer_sizes/alpha_mlp/lr_init) |
+| ~~**H7**~~ | Division by zero in features *(resolved in original audit)* |
+| ~~**M7**~~ | Purged OOF for stacking *(resolved in original audit)* |
+| ~~**L12**~~ | Online learning rate-limited *(resolved in original audit)* |
+
+### Still open
+1. **C1** — Online learning target misalignment with `forecast_horizon > 1`
+2. **C3** — `_apply_metadata_params` can't distinguish "user set default" from "not set"
+3. **H1-H4**, **M1-M6**, **M8-M10**, **L1-L11** — remaining medium/low priority items

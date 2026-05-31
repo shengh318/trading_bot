@@ -5,15 +5,23 @@ import { useTheme } from "../theme/ThemeContext";
 export default function Strategies() {
   const { colors } = useTheme();
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.getStrategies().then(setStrategies).catch(() => {});
+    api.getStrategies().then(setStrategies).catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : String(e));
+    });
   }, []);
 
   return (
     <div>
       <h3 style={{ margin: "0 0 12px" }}>Available Strategies</h3>
-      {strategies.length === 0 ? (
+      {error && (
+        <p style={{ color: "#e44", marginBottom: 12 }}>
+          Error: {error}
+        </p>
+      )}
+      {!error && strategies.length === 0 ? (
         <p style={{ color: colors.textMuted }}>No strategies found</p>
       ) : (
         strategies.map((s) => (

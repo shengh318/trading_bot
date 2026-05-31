@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type AccountSummary, type Position, type Order } from "../api/client";
 import AccountSummaryWidget from "../components/AccountSummary";
 import PortfolioChart from "../components/PortfolioChart";
@@ -34,10 +34,14 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const chartData = equity.map((p) => ({
-    time: p.timestamp as unknown as import("lightweight-charts").Time,
-    value: p.equity,
-  }));
+  const chartData = useMemo(
+    () =>
+      equity.map((p) => ({
+        time: p.timestamp as unknown as import("lightweight-charts").Time,
+        value: p.equity,
+      })),
+    [equity],
+  );
 
   if (loading) {
     return <div style={{ padding: 24, color: "#888" }}>Loading Alpaca account data…</div>;
