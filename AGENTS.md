@@ -23,6 +23,8 @@
 | Find pairs (custom + save) | `.venv\Scripts\python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` | `.venv/bin/python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` |
 | CorrCointStrategy tests | `.venv\Scripts\python -m pytest backend\tests\test_corr_coint_strat.py -v` | `.venv/bin/python -m pytest backend/tests/test_corr_coint_strat.py -v` |
 | CorrCointStrategy discovery | `.venv\Scripts\python -m backend.stats_arb.cli --auto-discover NVDA,AMD,INTC,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AVGO,CSCO,JPM,GS,KO,PEP --no-parallel --no-plots --output-md discover.md` | `.venv/bin/python -m backend.stats_arb.cli --auto-discover NVDA,AMD,INTC,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AVGO,CSCO,JPM,GS,KO,PEP --no-parallel --no-plots --output-md discover.md` |
+| TSMOM backtest | `.venv\Scripts\python -m backend.api.tsmom_routes` | `.venv/bin/python -m backend.api.tsmom_routes` |
+| TSMOM strategy tests | `.venv\Scripts\python -m pytest backend\tests\test_tsmom_strategy.py -v` | `.venv/bin/python -m pytest backend/tests/test_tsmom_strategy.py -v` |
 | Build C++ extension | `cmd /c "call `"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat`" && cd backend\cpp_ext && ..\..\.venv\Scripts\python setup.py build_ext --inplace"` | `cd backend/cpp_ext && python setup.py build_ext --inplace` |
 
 ## Project Structure
@@ -38,6 +40,7 @@ backend/
 │   ├── alpaca_routes.py     /api/alpaca/account, /api/alpaca/positions, /api/alpaca/orders, /api/alpaca/portfolio
 │   ├── ml_routes.py         /api/ml/models, /api/ml/retrain, /api/correlation/data
 │   ├── pairs_routes.py      /api/pairs/analyze, /api/pairs/rank, /api/pairs/heatmap
+│   ├── tsmom_routes.py      /api/tsmom — Time-Series Momentum analysis, research, ML
 │   ├── models.py            Pydantic models: AccountSummary, BacktestRunRequest, MlModelInfo, PairData, etc.
 │   └── deps.py              Shared Database singleton dependency
 ├── strategies/              Strategy base class + implementations
@@ -46,7 +49,9 @@ backend/
 │   ├── sma_crossover.py     SmaCrossover — buy when short SMA > long SMA, sell on cross below
 │   ├── simple_strat_1.py    SimpleStrat1 — mean reversion DCA, buys on drops from open, sells green days
 │   ├── ml_strategy.py       MLStrategy — loads trained .joblib model, computes 38 features, buy/sell/hold
-│   └── corr_coint_strat.py  CorrCointStrategy — correlation + cointegration mean-reversion pairs strategy
+│   ├── corr_coint_strat.py  CorrCointStrategy — correlation + cointegration mean-reversion pairs strategy
+│   ├── auto_coint_strategy.py AutoCointStrategy — auto-discovers best cointegrated pair from symbol list
+│   └── tsmom_strategy.py    TSMOMStrategy — Time-Series Momentum (13 research phases, multi-asset)
 ├── ml/                      ML training pipeline
 │   ├── features.py          compute_features(df) — 38 indicators (SMA, EMA, RSI, MACD, BB, ATR, etc.)
 │   ├── model.py             save_model/load_model/list_models/delete_model — versioned .joblib + metadata
@@ -82,8 +87,12 @@ backend/
 │   ├── cli.py               CLI entry point: --pair, --pairs-file, --heatmap, --rank, --ml, --purged, --json
 │   ├── discover.py          Auto-discovery: screens all pairs via EG cointegration, full pipeline on top candidates, ranks, filters by profitability, outputs table + JSON + Markdown
 │   └── visualization.py     Visualizer — spread/zscore/cumulative/heatmap plots via matplotlib+seaborn
+├── cpp_ext/                  C++ pybind11 acceleration module (19 kernels)
+│   ├── module.cpp            1500-line C++ implementation (Hurst, ADF, EG, Kalman, RSI, MACD, BB, ATR, etc.)
+│   ├── __init__.py            Python wrapper + pure-Python numpy fallbacks
+│   └── setup.py               Build config
 ├── find_pairs.py             Automated pairs discovery wrapper (correlation + cointegration + markdown report)
-├── tests/                   50 pytest test files (742 `def test_`)
+├── tests/                   51 pytest test files (774 `def test_`)
 │   ├── test_backtest_engine.py        (12)  — single + multi-symbol, streaming, dividend
 │   ├── test_backtest_metrics.py       (11)  — Sharpe, drawdown, win rate calculations
 │   ├── test_api_routes.py             (17)  — strategies, backtest CRUD, portfolio
@@ -94,6 +103,7 @@ backend/
 │   ├── test_api.py                    (4)   — health check
 │   ├── test_alpaca_routes.py          (12)  — Alpaca API routes
 │   ├── test_corr_coint_strat.py       (37)  — CorrCointStrategy entry/exit, cooldown, correlation gate, stop-loss
+│   ├── test_tsmom_strategy.py         (?)   — TSMOM strategy multi-asset backtest, signal generation, walk-forward
 │   ├── test_correlation.py            (35)  — correlation API endpoint
 │   ├── test_stats_arb.py              (18)  — cointegration, ranking, strategy, walk-forward
 │   ├── test_ml_routes.py              (14)  — ML retrain API, status polling
@@ -156,7 +166,7 @@ frontend/
 ## Key Architecture
 
 ### API Layer (FastAPI)
-- 7 routers in `backend/api/main.py:35-41`: router, ws_router, live_router, live_ws_router, alpaca_router, ml_router, pairs_router
+- 8 routers in `backend/api/main.py:71-78`: router, ws_router, live_router, live_ws_router, alpaca_router, ml_router, pairs_router, tsmom_router
 - All return Pydantic models defined in `backend/api/models.py`
 - DB dependency via `backend/api/deps.py` (singleton `Database`)
 
@@ -164,7 +174,7 @@ frontend/
 - `Strategy` (abstract base in `base.py:7`) — requires `init(data: pd.DataFrame)`, `next(i, data, portfolio) -> Signal`, optional `on_trade()`
 - `Portfolio` — holds `cash`, `positions: dict[str, float]`, `avg_entry: dict[str, float]`
 - `Signal` enum — `BUY`, `SELL`, `EXIT`, `HOLD`, `NONE`
-- `registry.py` — imports all strategies into `STRATEGY_REGISTRY` dict, `get_strategy(name)` creates instances
+- `registry.py` — imports 6 strategies into `STRATEGY_REGISTRY` dict, `get_strategy(name)` creates instances
 - Add new strategy: create file, subclass `Strategy`, implement `init` + `next`, import in `registry.py`, add to `STRATEGY_REGISTRY`
 
 ### Backtest (`backend/backtest/engine.py`)
@@ -195,6 +205,13 @@ frontend/
 - **Auto-Discovery** (`discover.py`): `--auto-discover [sp500|nasdaq100|dow30|TICKERS]` — screens all pairs via EG cointegration, runs full pipeline on top candidates, ranks, filters by profitability (Sharpe ≥ 1.0), outputs table + optional JSON/Markdown
 - **API**: `POST /api/pairs/analyze` (with `PairAnalysisRequest`), `POST /api/pairs/rank`, `POST /api/pairs/heatmap`
 
+### C++ Acceleration (`backend/cpp_ext/`)
+- 19 pybind11 kernels with automatic pure-Python numpy fallbacks
+- **Phase 1 (6 kernels):** `hest_exponent` (R/S), `rolling_ols` (prefix-sum O(1)), `kalman_fit` (RLS), `compute_time_to_mean`, `triple_barrier_label`, `rolling_slope` (O(1) update)
+- **Phase 2 (5 kernels):** `estimate_ols` (NaN-safe), `rolling_hurst`, `rolling_half_life`, `adf_test` (AIC lag selection, embedded MacKinnon CVs), `eg_coint_test` (full EG with embedded CVs)
+- **Phase 3 (8 kernels):** `rsi` (SMA-based, prefix-sum), `macd` (EMA-based), `bollinger` (prefix-sum), `atr` (Wilder smoothing), `mfi`, `adx` (+DI, -DI), `bai_perron_breaks` (sequential BIM), `cusum_breaks` (recursive residuals)
+- Build via: `python setup.py build_ext --inplace` from `backend/cpp_ext/`
+
 ### Frontend (`frontend/src/`)
 - **No router** — tab-based navigation via `useState<Tab>` in `App.tsx`
 - **API client** (`api/client.ts`): single `ApiClient` class with 24 methods, all return typed responses
@@ -205,7 +222,7 @@ frontend/
 
 ## Tests Summary
 
-### Backend: 50 test files with 742 `def test_` calls
+### Backend: 51 test files with 774 `def test_` calls
 | File | Tests | What it covers |
 |------|-------|----------------|
 | `test_api_routes.py` | 17 | Strategies, backtest CRUD, portfolio, error cases |
@@ -218,6 +235,7 @@ frontend/
 | `test_api.py` | 4 | Health endpoint |
 | `test_alpaca_routes.py` | 12 | Alpaca API routes |
 | `test_corr_coint_strat.py` | 37 | CorrCointStrategy entry/exit, cooldown, correlation gate, stop-loss |
+| `test_tsmom_strategy.py` | (?) | TSMOM strategy multi-asset backtest, signal generation, walk-forward |
 | `test_correlation.py` | 35 | _safe helper, API endpoint, model validation |
 | `test_stats_arb.py` | 18 | Cointegration, ranking corrections, strategy, WF leakage |
 | `test_ml_routes.py` | 14 | ML retrain API, status polling |
@@ -265,6 +283,7 @@ frontend/
 2. **Live Trading**: Frontend `LiveSocket.connect()` → WS to `/ws/live` → `LiveEngine.start()` with callbacks → polls Alpaca bars → runs strategies → executes orders → streams bars/trades via WS
 3. **ML Retrain**: Frontend MlLab POST `/api/ml/retrain` → spawns `backend.ml.train` subprocess → saves `.joblib` files → frontend polls `GET /api/ml/models` for completion
 4. **Pairs Analysis**: Frontend POST `/api/pairs/analyze` → `PairAnalyzer.analyze()` runs full pipeline → returns `PairAnalysisResponse` with all metrics + series data → frontend renders spread/z-score charts + metric cards
+5. **TSMOM Research**: Frontend POST `/api/tsmom/analyze` → `TSMOMBacktestEngine.run()` → returns `TSMOMResearchResponse` with metrics, benchmarks, regime analysis, walk-forward results
 
 ## Configuration
 - `.env` file: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_PAPER`, `DB_PATH`

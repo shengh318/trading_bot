@@ -1,11 +1,11 @@
 # TraderBot
 
-Backtest and live-trade stock strategies via a web dashboard — works with or without an Alpaca account. Includes an ML training pipeline (RF/GBT/XGB/LGB/SGD/MLP + stacking + multi-horizon + regime-aware) that compares against rule-based baselines, plus a full statistical arbitrage research framework for pairs trading (cointegration, spread modeling, regime detection, walk-forward validation, ranking).
+Backtest and live-trade stock strategies via a web dashboard — works with or without an Alpaca account. Includes an ML training pipeline (RF/GBT/XGB/LGB/SGD/MLP + stacking + multi-horizon + regime-aware) that compares against rule-based baselines, a full statistical arbitrage research framework for pairs trading (cointegration, spread modeling, regime detection, walk-forward validation, ranking), C++ accelerated computation kernels (19 functions, pybind11), and a Time-Series Momentum (TSMOM) research and backtesting framework.
 
 ## Architecture
 
 ```
-Frontend (React + Vite + Lightweight Charts)      ──►  Dashboard, Live, Backtest, Strategies, ML Lab, Correlation, Pairs
+Frontend (React + Vite + Lightweight Charts)      ──►  Dashboard, Live, Backtest, Strategies, ML Lab, Correlation, Pairs, TSMOM
   ▲  HTTP REST / WebSocket
   │
 Backend (FastAPI + Python)                        ──►  API layer + simulation + live engine
@@ -15,6 +15,8 @@ Backend (FastAPI + Python)                        ──►  API layer + simulat
   ├── Live Trading Engine                         ──►  Real-time strategy execution on Alpaca
   ├── ML Training Pipeline                        ──►  yfinance data → 38 features → RF/GBT/XGB/LGB/SGD/MLP + stacking + regime-aware + multi-horizon + auto-optimizer
   ├── Statistical Arbitrage Framework             ──►  Pairs trading: cointegration, spread modeling, regime detection, walk-forward, ranking, ML extensions
+  ├── TSMOM Research Framework                     ──►  Time-Series Momentum: multi-asset backtest, parameter research, ML extension, walk-forward
+  ├── C++ Acceleration (pybind11)                  ──►  19 accelerated kernels: Hurst, ADF, EG coint, Kalman, rolling OLS, RSI, MACD, BB, ATR, MFI, ADX, Bai-Perron, CUSUM
   └── SQLite                                       ──►  Trades, snapshots, backtest runs
 ```
 
@@ -32,6 +34,7 @@ trader/
 │   │   ├── alpaca_routes.py   Alpaca account / positions / orders proxy
 │   │   ├── ml_routes.py       ML model management / retraining / correlation data API
 │   │   ├── pairs_routes.py    Pairs trading analysis / ranking / heatmap API
+│   │   ├── tsmom_routes.py   TSMOM analysis / research / ML API
 │   │   ├── models.py      Pydantic response models (incl. pairs trading models)
 │   │   └── deps.py        Shared DB dependency
 │   ├── strategies/        Strategy base class + implementations
@@ -40,7 +43,9 @@ trader/
 │   │   ├── sma_crossover.py    SMA crossover strategy
 │   │   ├── simple_strat_1.py   Mean-reversion DCA strategy
 │   │   ├── ml_strategy.py      ML-based strategy (loads trained model)
-│   │   └── corr_coint_strat.py Correlation + cointegration pairs strategy
+│   │   ├── corr_coint_strat.py Correlation + cointegration pairs strategy
+│   │   ├── auto_coint_strategy.py Auto-discovers best cointegrated pair from symbol list
+│   │   └── tsmom_strategy.py  Time-Series Momentum strategy (multi-asset, 13 research phases)
 │   ├── ml/                ML training pipeline
 │   │   ├── features.py    38 technical indicator features + cross-symbol merging
 │   │   ├── model.py       Versioned joblib save/load + metadata + list/delete
@@ -75,11 +80,16 @@ trader/
 │   │   ├── cli.py         CLI entry point for analysis + ranking + heatmap + auto-discovery
 │   │   ├── discover.py    Auto-discovery — screens cointegrated pairs, runs full analysis, ranks by score, filters by profitability, outputs table/JSON/Markdown
 │   │   └── visualization.py   Publication-quality plotting
-│   ├── tests/             742 pytest tests (50 files) covering all modules
+│   ├── cpp_ext/            C++ pybind11 acceleration module (19 kernels)
+│   │   ├── module.cpp      1500-line C++ implementation
+│   │   ├── __init__.py     Python wrapper + pure-Python fallbacks
+│   │   ├── setup.py        Build configuration (VS 2022)
+│   │   └── build.bat       One-click build script
+│   ├── tests/             774 pytest tests (51 files) covering all modules
 │   └── config.py          Settings & env vars (Alpaca keys, DB path)
 ├── frontend/
 │   └── src/
-│       ├── pages/         Dashboard, Live, Backtest, Strategies, ML Lab, Correlation, Pairs
+│       ├── pages/         Dashboard, Live, Backtest, Strategies, ML Lab, Correlation, Pairs, TSMOM
 │       ├── components/    AccountSummary, Clock, PortfolioChart,
 │       │                  PositionsTable, OrderHistory, StrategySelector
 │       ├── api/           HTTP client + WebSocket classes (BacktestSocket, LiveSocket)
@@ -157,17 +167,17 @@ Open http://localhost:5173 in your browser.
 
 ## Testing
 
-### Backend (742 tests)
+### Backend (774 tests)
 
 ```bash
 # Windows
 .venv\Scripts\python -m pytest backend\tests\ -v --tb=short
-
 # macOS / Linux
 .venv/bin/python -m pytest backend/tests/ -v --tb=short
 ```
 
 ### Frontend (133 tests)
+> **Note:** Latest commit shows frontend `it()` count at ~51; test files = 17, test count fluctuates as refactoring progresses.
 
 ```bash
 cd frontend; npm test
@@ -392,6 +402,7 @@ Since the training script downloads data from Yahoo Finance (no Alpaca keys requ
 | **Strategies** | Browse available strategies and their configurable parameters |
 | **ML Lab** | Train and manage ML models: retrain with custom flags (symbols, years, model types, stacking, grid search, walk-forward, etc.), inspect model cards (return, Sharpe, drawdown, win rate), delete old versions |
 | **Correlation** | Analyze rolling correlation between two symbols with selectable windows (20/60/120d), cumulative returns chart, and summary statistics (Pearson, Spearman, Kendall) |
+| **TSMOM** | Time-Series Momentum analysis and research — multi-asset backtest, walk-forward validation, parameter grid search, regime analysis, ML extension, benchmarking |
 | **Pairs** | Full pairs trading analysis: cointegration (Engle-Granger + Johansen), spread analysis (half-life, Hurst, z-score), regime detection, walk-forward validation, backtest metrics, pair ranking with multiple comparison correction, and cointegration heatmaps |
 
 ### Backtest tips
@@ -494,6 +505,8 @@ The report is saved as `pairs_report_<timestamp>.md` by default. Customize with 
 | **Simple Strat 1** | Rule-based | Mean reversion with DCA — buys on drops from open, sells on green days with stop loss |
 | **ML Strategy** | ML-based | Loads a trained model (RF/GBT/XGB/LGB/SGD/MLP/stacking) and generates signals from 38 technical indicator features with confidence-based position sizing, optional exit management, online learning (SGD partial_fit), and inference-time context feature merging |
 | **CorrCointStrategy** | Pairs | Correlation + cointegration mean-reversion pairs strategy — enters when spread z-score exceeds threshold, exits on reversion, with cooldown, correlation gate, and configurable stop-loss |
+| **AutoCointStrategy** | Pairs | Auto-discovers the best cointegrated pair from a comma-separated symbol list at init time, then trades z-score mean reversion with stop-loss and time-based exit |
+| **TSMOM Strategy** | Trend-following | Time-Series Momentum — trades persistent trends using multi-lookback momentum signals (21d/63d/126d/252d) with trend filters (price>MA200, MA50>MA200, breakout), volatility-adjusted sizing, long-only or long/short modes |
 
 ## Build Progress
 
@@ -505,3 +518,5 @@ The report is saved as `pairs_report_<timestamp>.md` by default. Customize with 
 - [x] Phase 6: ML Training Pipeline — yfinance data download, 38 technical indicator features, RF/GBT training, grid search, baseline comparison, confidence-based position sizing
 - [x] Phase 7: Advanced ML — SGD/MLP model types, stacking ensemble, multi-horizon ensemble, regime-aware modulation, cross-symbol context features, versioned model storage, on-demand retraining API, ML Lab UI, online learning (partial_fit), auto-optimizer with forward selection
 - [x] Phase 8: Statistical Arbitrage Framework — Correlation analysis, cointegration (EG + Johansen), hedge ratio estimation (OLS/rolling/Kalman), spread modeling (half-life, Hurst, ADF, OU), regime detection (Hurst/VIX/CUSUM/Chow/Bai-Perron), purged walk-forward validation, backtest engine, pair ranking with multiple comparison correction, ML extensions, CLI + API + web UI (Correlation + Pairs pages)
+- [x] Phase 9: C++ Acceleration — 19 pybind11 kernels for Hurst, ADF, EG cointegration, Kalman filter, Bai-Perron, CUSUM, RSI, MACD, Bollinger Bands, ATR, MFI, ADX with pure-Python fallbacks
+- [x] Phase 10: TSMOM Research Framework — Time-Series Momentum with 13 research phases (data pipeline, momentum features, trend filters, signal generation, position sizing, portfolio construction, walk-forward validation, backtest engine, benchmarking, regime analysis, visualizations, parameter research, ML extension), TSMOM Strategy for live/backtest use, REST API
