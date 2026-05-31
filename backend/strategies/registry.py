@@ -1,6 +1,7 @@
 from typing import Any, Optional
 
 from backend.strategies.base import Strategy
+from backend.strategies.auto_coint_strategy import AutoCointStrategy
 from backend.strategies.corr_coint_strat import CorrCointStrategy
 from backend.strategies.ml_strategy import MLStrategy
 from backend.strategies.sma_crossover import SmaCrossover
@@ -59,6 +60,20 @@ _REGISTRY: dict[str, dict] = {
             {"name": "base_pair_capital", "type": "float", "default": 10000.0},
             {"name": "max_loss_pct", "type": "float", "default": 5.0},
             {"name": "hedge_ratio_window", "type": "int", "default": 60},
+        ],
+    },
+    "AutoCointStrategy": {
+        "class": AutoCointStrategy,
+        "description": "Auto-discovers the best cointegrated pair from a comma-separated list of symbols. Downloads prices, computes Pearson correlations, runs EG cointegration on top candidates, then trades the best pair using z-score mean reversion with stop-loss and time-based exit. No prior pair discovery needed.",
+        "params": [
+            {"name": "symbols", "type": "str", "default": "NVDA,AMD"},
+            {"name": "min_corr", "type": "float", "default": 0.7},
+            {"name": "z_entry", "type": "float", "default": 2.0},
+            {"name": "z_exit", "type": "float", "default": 0.0},
+            {"name": "stop_loss", "type": "float", "default": 3.0},
+            {"name": "max_holding_days", "type": "int", "default": 40},
+            {"name": "base_pair_capital", "type": "float", "default": 10000.0},
+            {"name": "min_trading_days", "type": "int", "default": 504},
         ],
     },
 }

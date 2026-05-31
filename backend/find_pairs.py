@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing as mp
 import sys
-import tempfile
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -52,6 +54,16 @@ if not logger.handlers:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     logger.addHandler(handler)
+
+_ON_WINDOWS = sys.platform == "win32"
+
+VERBOSE = True
+
+
+def _dbg(msg: str) -> None:
+    """Print directly to stdout with flush, bypassing logger."""
+    if VERBOSE:
+        print(f"  [find_pairs] {msg}", flush=True)
 
 
 _UNIVERSE_PRESETS = {"sp500", "nasdaq100", "dow30"}
@@ -165,8 +177,57 @@ def _test_coint(args: tuple) -> tuple[str, str, float, float]:
             return (a, b, res.p_value, -np.log10(max(res.p_value, 1e-15)))
         return (a, b, 1.0, 0.0)
     except Exception as e:
-        logger.debug(f"EG test failed {a}/{b}: {e}")
+        _dbg(f"EG test failed for {a}/{b}: {e}")
         return (a, b, 1.0, 0.0)
+
+
+def _test_coint_sequential(
+    correlated_pairs: list[tuple[str, str, float]],
+    all_prices: pd.DataFrame,
+    significance: float,
+) -> list[tuple[str, str, float, float]]:
+    """Run EG cointegration on correlated pairs sequentially (Windows-safe)."""
+    cointegrated: list[tuple[str, str, float, float]] = []
+    tickers_in_data = set(all_prices.columns)
+    total = len(correlated_pairs)
+    for idx, (a, b, _) in enumerate(correlated_pairs, 1):
+        if a not in tickers_in_data or b not in tickers_in_data:
+            continue
+        if idx % 50 == 0 or idx == total or idx == 1:
+            _dbg(f"  EG test {idx}/{total}")
+        try:
+            pair_prices = all_prices[[a, b]].ffill().dropna(how="any")
+            if len(pair_prices) < 50:
+                continue
+            ratio = pair_prices[a] / pair_prices[b]
+            ratio_cv = ratio.std() / ratio.mean()
+            if not np.isfinite(ratio_cv) or ratio_cv < 0.001:
+                continue
+            corr_val = pair_prices[a].corr(pair_prices[b])
+            if corr_val >= 0.99 or not np.isfinite(corr_val):
+                continue
+            res = _run_coint_silent(pair_prices, significance)
+            if res.is_cointegrated:
+                cointegrated.append((a, b, res.p_value, -np.log10(max(res.p_value, 1e-15))))
+        except Exception as e:
+            _dbg(f"EG test failed {a}/{b}: {e}")
+    cointegrated.sort(key=lambda x: x[3], reverse=True)
+    return cointegrated
+
+
+def _analyze_full_sequential(
+    pair_args: list[tuple],
+) -> list[Any]:
+    """Run full pipeline sequentially (Windows-safe)."""
+    results: list[Any] = []
+    total = len(pair_args)
+    for idx, args in enumerate(pair_args, 1):
+        if idx % 10 == 0 or idx == total or idx == 1:
+            _dbg(f"  Full analysis {idx}/{total}")
+        result = _analyze_full(args)
+        if result is not None:
+            results.append(result)
+    return results
 
 
 def _analyze_full(args: tuple):
@@ -213,6 +274,7 @@ def find_pairs(
     capital: float = 100_000.0,
     output_md: str | None = None,
     output_json: bool = False,
+    workers: int = 0,
 ) -> list[dict]:
     """Run 3-phase pairs discovery.
 
@@ -220,18 +282,24 @@ def find_pairs(
     Phase 2: EG cointegration on correlated pairs (parallel)
     Phase 3: Full pipeline on top N candidates -> rank -> filter -> report
     """
-    if end is None:
-        end = datetime.today().strftime("%Y-%m-%d")
+    try:
+        if end is None:
+            end = datetime.today().strftime("%Y-%m-%d")
 
-    tickers = resolve_universe(universe, universe_file)
+        tickers = resolve_universe(universe, universe_file)
+    except Exception as e:
+        print(f"ERROR: Failed to resolve universe: {e}", flush=True)
+        traceback.print_exc()
+        return []
+
     n = len(tickers)
-    logger.info(f"Universe: {n} tickers")
-    logger.info(f"Period: {start} -> {end}")
+    _dbg(f"Universe: {n} tickers")
+    _dbg(f"Period: {start} -> {end}")
 
     # ── Phase 1: Download + correlation filter ──
     # Download each ticker individually and outer-join to prevent yfinance
     # from truncating the date range to the common intersection.
-    logger.info(f"Phase 1: Downloading {n} tickers individually ...")
+    _dbg(f"Phase 1: Downloading {n} tickers individually ...")
     all_prices = _download_prices(tickers, start, end)
     if len(all_prices.columns) < 2:
         logger.error("Fewer than 2 valid tickers remaining after filtering")
@@ -257,69 +325,23 @@ def find_pairs(
         return []
 
     # ── Phase 2: EG cointegration on filtered pairs ──
-    logger.info(f"Phase 2: Testing {len(correlated_pairs)} pairs for cointegration ...")
+    _dbg(f"Phase 2: Testing {len(correlated_pairs)} pairs for cointegration ...")
 
-    # Save prices to temp parquet so workers can read efficiently
-    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
-        tmp_path = tmp.name
-    all_prices.to_parquet(tmp_path)
+    # Use C++ engine if available, otherwise pure Python sequential
+    from .cpp_engine import test_coint_pairs
 
-    coint_args = [
-        (a, b, tmp_path, significance)
-        for a, b, _ in correlated_pairs
-    ]
+    cointegrated: list[tuple[str, str, float, float]] = []
+    corr_tickers = list(dict.fromkeys([t for p in correlated_pairs for t in (p[0], p[1])]))
+    pair_prices = all_prices[[c for c in corr_tickers if c in all_prices.columns]].ffill()
 
-    import os
-    try:
-        cointegrated: list[tuple[str, str, float, float]] = []
-        max_workers = min(8, len(coint_args))
-        with ProcessPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_test_coint, args): args for args in coint_args}
-            for future in as_completed(futures):
-                try:
-                    cointegrated.append(future.result())
-                except Exception as e:
-                    logger.error(f"EG worker failed: {e}")
+    results = test_coint_pairs(pair_prices, significance)
+    for r in results:
+        if r["is_cointegrated"]:
+            s = -np.log10(max(r["p_value"], 1e-15))
+            cointegrated.append((r["ticker_a"], r["ticker_b"], r["p_value"], s))
 
-        # Filter to only cointegrated, sort by -log10(p)
-        cointegrated = [(a, b, p, s) for a, b, p, s in cointegrated if s > 0]
-        cointegrated.sort(key=lambda x: x[3], reverse=True)
-
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-
-    # Fallback: if all parallel workers failed (common on Windows), run sequentially
-    if not cointegrated and coint_args:
-        logger.info("Phase 2 (fallback): retrying cointegration tests sequentially ...")
-        all_prices = _download_prices(tickers, start, end)
-        valid_cols = [c for c in all_prices.columns if c in tickers]
-        all_prices = all_prices[valid_cols].ffill()
-        for a, b, _ in correlated_pairs:
-            if a not in all_prices.columns or b not in all_prices.columns:
-                continue
-            try:
-                pair_prices = all_prices[[a, b]].dropna(how="any")
-                if len(pair_prices) < 50:
-                    continue
-                ratio = pair_prices[a] / pair_prices[b]
-                ratio_cv = ratio.std() / ratio.mean()
-                if not np.isfinite(ratio_cv) or ratio_cv < 0.001:
-                    continue
-                corr_val = pair_prices[a].corr(pair_prices[b])
-                if corr_val >= 0.99 or not np.isfinite(corr_val):
-                    continue
-                res = _run_coint_silent(pair_prices, significance)
-                if res.is_cointegrated:
-                    cointegrated.append((a, b, res.p_value, -np.log10(max(res.p_value, 1e-15))))
-            except Exception as e:
-                logger.debug(f"EG fallback failed {a}/{b}: {e}")
-        cointegrated.sort(key=lambda x: x[3], reverse=True)
-        logger.info(f"Phase 2 (fallback): Found {len(cointegrated)} cointegrated pairs (p < {significance})")
-
-    logger.info(f"Phase 2: Found {len(cointegrated)} cointegrated pairs (p < {significance})")
+    cointegrated.sort(key=lambda x: x[3], reverse=True)
+    _dbg(f"Phase 2: Found {len(cointegrated)} cointegrated pairs (p < {significance})")
 
     if not cointegrated:
         logger.warning("No cointegrated pairs found.")
@@ -327,7 +349,7 @@ def find_pairs(
 
     # ── Phase 3: Full pipeline on top N candidates ──
     candidates = cointegrated[:top_candidates]
-    logger.info(f"Phase 3: Running full pipeline on top {len(candidates)} candidates ...")
+    _dbg(f"Phase 3: Running full pipeline on top {len(candidates)} candidates ...")
 
     pair_args = [
         (
@@ -337,25 +359,19 @@ def find_pairs(
         for a, b, _, _ in candidates
     ]
 
-    all_results: list = []
-    max_workers = min(8, len(pair_args))
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_analyze_full, args): args for args in pair_args}
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-                if result is not None:
-                    all_results.append(result)
-            except Exception as e:
-                logger.error(f"Full pipeline worker failed: {e}")
+    num_workers = min(workers or mp.cpu_count(), len(pair_args))
+    _dbg(f"Phase 3: Running full pipeline on {len(pair_args)} candidates using {num_workers} workers ...")
 
-    # Fallback to sequential if parallel produced no results
+    try:
+        with mp.Pool(processes=num_workers) as pool:
+            all_results = [r for r in pool.map(_analyze_full, pair_args) if r is not None]
+    except Exception as e:
+        _dbg(f"Multiprocessing failed ({e}), falling back to sequential ...")
+        all_results = _analyze_full_sequential(pair_args)
+
     if not all_results:
-        logger.warning("Parallel analysis produced no results; trying sequentially ...")
-        for args in pair_args:
-            result = _analyze_full(args)
-            if result is not None:
-                all_results.append(result)
+        _dbg("Parallel analysis produced no results; trying sequentially ...")
+        all_results = _analyze_full_sequential(pair_args)
 
     if not all_results:
         logger.warning("No full analyses succeeded.")
@@ -388,6 +404,8 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+    print("Starting Stock Pairs Discovery...", flush=True)
 
     parser = argparse.ArgumentParser(
         description="Find good stock pairs using correlation + cointegration analysis (3-phase pipeline)",
@@ -452,6 +470,10 @@ Examples:
         help="Also output JSON to stdout",
     )
     parser.add_argument(
+        "--workers", type=int, default=mp.cpu_count(),
+        help="Number of parallel workers for full pipeline (default: CPU count)",
+    )
+    parser.add_argument(
         "--log-level", type=str, default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
@@ -462,33 +484,40 @@ Examples:
 
     output_file = args.output or f"pairs_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
 
-    print(f"\n{'='*60}")
-    print(f"Stock Pairs Discovery — 3-Phase Pipeline")
-    print(f"{'='*60}")
-    print(f"Universe:     {args.universe}")
-    print(f"Period:       {args.start} -> today")
-    print(f"Min corr:     {args.min_corr}")
-    print(f"Filters:      Sharpe >= {args.min_sharpe}, Return >= {args.min_return}%, DD >= {args.max_drawdown}%")
-    print(f"Top N:        {args.top_candidates}")
-    print(f"Output:       {output_file}")
-    print(f"{'='*60}\n")
+    print(f"\n{'='*60}", flush=True)
+    print(f"Stock Pairs Discovery — 3-Phase Pipeline", flush=True)
+    print(f"{'='*60}", flush=True)
+    print(f"Universe:     {args.universe}", flush=True)
+    print(f"Period:       {args.start} -> today", flush=True)
+    print(f"Min corr:     {args.min_corr}", flush=True)
+    print(f"Filters:      Sharpe >= {args.min_sharpe}, Return >= {args.min_return}%, DD >= {args.max_drawdown}%", flush=True)
+    print(f"Top N:        {args.top_candidates}", flush=True)
+    print(f"Workers:      {args.workers}", flush=True)
+    print(f"Output:       {output_file}", flush=True)
+    print(f"{'='*60}\n", flush=True)
 
-    find_pairs(
-        universe=args.universe,
-        start=args.start,
-        significance=DEFAULT_SIGNIFICANCE,
-        min_correlation=args.min_corr,
-        top_candidates=args.top_candidates,
-        min_sharpe=args.min_sharpe,
-        min_return_pct=args.min_return,
-        max_drawdown_pct=args.max_drawdown,
-        require_mean_reverting=args.require_mean_reverting,
-        require_no_breaks=args.require_no_breaks,
-        capital=args.capital,
-        output_md=output_file,
-        output_json=args.json,
-    )
+    try:
+        find_pairs(
+            universe=args.universe,
+            start=args.start,
+            significance=DEFAULT_SIGNIFICANCE,
+            min_correlation=args.min_corr,
+            top_candidates=args.top_candidates,
+            min_sharpe=args.min_sharpe,
+            min_return_pct=args.min_return,
+            max_drawdown_pct=args.max_drawdown,
+            require_mean_reverting=args.require_mean_reverting,
+            require_no_breaks=args.require_no_breaks,
+            capital=args.capital,
+            output_md=output_file,
+            output_json=args.json,
+            workers=args.workers,
+        )
+    except Exception as e:
+        print(f"\nFATAL ERROR: {e}", flush=True)
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
+    print("find_pairs script starting...", flush=True)
     main()

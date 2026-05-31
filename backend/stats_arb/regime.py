@@ -255,7 +255,9 @@ class RegimeDetector:
             reshaped = trimmed.reshape((chunks, lag))
             mean_adj = reshaped - reshaped.mean(axis=1, keepdims=True)
             cumsum = mean_adj.cumsum(axis=1)
-            rs = (cumsum.max(axis=1) - cumsum.min(axis=1)) / reshaped.std(axis=1, ddof=0)
+            std_vals = reshaped.std(axis=1, ddof=0)
+            std_vals = np.where(std_vals > 0, std_vals, np.nan)
+            rs = (cumsum.max(axis=1) - cumsum.min(axis=1)) / std_vals
             rs = rs[~np.isnan(rs)]
             if len(rs) > 0:
                 tau.append(float(rs.mean()))
