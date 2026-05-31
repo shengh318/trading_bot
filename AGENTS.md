@@ -44,7 +44,7 @@ backend/
 │   ├── models.py            Pydantic models: AccountSummary, BacktestRunRequest, MlModelInfo, PairData, etc.
 │   └── deps.py              Shared Database singleton dependency
 ├── strategies/              Strategy base class + implementations
-│   ├── base.py              Strategy (abstract: init, next, on_trade), Portfolio, Signal enum
+│   ├── README.md            All strategies reference, params, TSMOM framework
 │   ├── registry.py          list_strategies(), get_strategy(name) — auto-discovers via STRATEGY_REGISTRY
 │   ├── sma_crossover.py     SmaCrossover — buy when short SMA > long SMA, sell on cross below
 │   ├── simple_strat_1.py    SimpleStrat1 — mean reversion DCA, buys on drops from open, sells green days
@@ -53,7 +53,7 @@ backend/
 │   ├── auto_coint_strategy.py AutoCointStrategy — auto-discovers best cointegrated pair from symbol list
 │   └── tsmom_strategy.py    TSMOMStrategy — Time-Series Momentum (13 research phases, multi-asset)
 ├── ml/                      ML training pipeline
-│   ├── features.py          compute_features(df) — 38 indicators (SMA, EMA, RSI, MACD, BB, ATR, etc.)
+│   ├── README.md            ML pipeline docs (training, CLI options, auto-optimizer)
 │   ├── model.py             save_model/load_model/list_models/delete_model — versioned .joblib + metadata
 │   ├── train.py             CLI training: 6 model types, grid search, stacking, multi-horizon, regime, walk-forward, Kelly, context symbols, triple barrier, pruning, regularization, embargo
 │   ├── stacking.py          StackingEnsemble, MetaLabeledModel, MultiHorizonEnsemble, RegimeAwareModel
@@ -70,7 +70,7 @@ backend/
 │   ├── store.py             Database — SQLite CRUD for backtest_runs, snapshots, positions, orders
 │   └── cache/               Parquet files for bars and dividends
 ├── stats_arb/               Statistical Arbitrage Research Framework (pairs trading, 17 files)
-│   ├── __init__.py           Package exports
+│   ├── README.md            Pairs discovery, CLI, API, pipeline docs
 │   ├── config.py            Defaults: windows, significance, z-entry/exit, fees, walk-forward params
 │   ├── data.py              DataManager — yfinance download + caching for pairs
 │   ├── correlation.py       CorrelationAnalyzer — rolling windows, stability score, threshold crossings, correlation collapse, overall_slope, max_correlation_drawdown
@@ -88,7 +88,7 @@ backend/
 │   ├── discover.py          Auto-discovery: screens all pairs via EG cointegration, full pipeline on top candidates, ranks, filters by profitability, outputs table + JSON + Markdown
 │   └── visualization.py     Visualizer — spread/zscore/cumulative/heatmap plots via matplotlib+seaborn
 ├── cpp_ext/                  C++ pybind11 acceleration module (19 kernels)
-│   ├── module.cpp            1500-line C++ implementation (Hurst, ADF, EG, Kalman, RSI, MACD, BB, ATR, etc.)
+│   ├── README.md             C++ pybind11 kernel reference (build, API, examples)
 │   ├── __init__.py            Python wrapper + pure-Python numpy fallbacks
 │   └── setup.py               Build config
 ├── find_pairs.py             Automated pairs discovery wrapper (correlation + cointegration + markdown report)
@@ -129,10 +129,6 @@ backend/
 ├── config.py                 Settings: ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_PAPER, DB_PATH, validate_config()
 ├── requirements.txt          fastapi, uvicorn, alpaca-py, pandas, numpy, scikit-learn, xgboost, lightgbm, yfinance, statsmodels, matplotlib, seaborn, scipy, pytest, httpx, websockets, pyarrow
 └── docs/                     Documentation
-    ├── TSMOM.md              Time-Series Momentum framework
-    ├── CPP_ACCELERATION.md   C++ pybind11 kernel reference
-    ├── PAIRS_DISCOVERY.md    Pairs discovery pipeline guide
-    ├── STRATEGIES.md         All strategies reference
     ├── planning/             Archived planning documents
     └── reports/              Generated pairs reports
 ```

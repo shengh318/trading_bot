@@ -85,6 +85,7 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
 
     # --- RSI (14-period) — C++ accelerated ---
     rsi_vals = cpp_rsi(close.values.astype(float), 14)
+    rsi_vals = np.where(np.isnan(rsi_vals), 50.0, rsi_vals)
     data["rsi"] = pd.Series(rsi_vals, index=data.index)
 
     # --- MACD — C++ accelerated ---

@@ -925,7 +925,7 @@ class TestL2_ActivePidsPersistence:
         from backend.api.models import MlRetrainResponse
 
         # Mock list_models to return empty (no model found either)
-        with patch("backend.api.ml_routes.list_models", return_value=[]):
+        with patch("backend.ml.model.list_models", return_value=[]):
             result = retrain_status("nonexistent_model_for_testing_xyz")
             assert result.status == "unknown", (
                 f"L2: Expected 'unknown' status for nonexistent model, got '{result.status}'"

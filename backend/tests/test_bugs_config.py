@@ -52,8 +52,6 @@ class TestBug8_UnusedParseTimeframeImport:
         # The function is never called in the source
         has_call = "_parse_timeframe(" in source
 
-        assert has_import, "_parse_timeframe is imported in live_websocket.py"
-        assert not has_call, (
-            "Bug 8: _parse_timeframe is imported but never called - "
-            "the timeframe variable is just stored as a string and passed to LiveEngine"
+        assert not has_import, (
+            "Bug 8 was fixed: _parse_timeframe import was removed from live_websocket.py"
         )
