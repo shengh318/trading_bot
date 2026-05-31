@@ -364,7 +364,14 @@ def find_pairs(
 
     try:
         with mp.Pool(processes=num_workers) as pool:
-            all_results = [r for r in pool.map(_analyze_full, pair_args) if r is not None]
+            total = len(pair_args)
+            all_results = []
+            _print_interval = max(1, total // 20)
+            for idx, result in enumerate(pool.imap_unordered(_analyze_full, pair_args), 1):
+                if result is not None:
+                    all_results.append(result)
+                if idx % _print_interval == 0 or idx == total:
+                    _dbg(f"  Pipeline [{idx}/{total}]  succeeded={len(all_results)}")
     except Exception as e:
         _dbg(f"Multiprocessing failed ({e}), falling back to sequential ...")
         all_results = _analyze_full_sequential(pair_args)
