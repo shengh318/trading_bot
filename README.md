@@ -86,6 +86,7 @@ trader/
 │   │   ├── setup.py        Build configuration (VS 2022)
 │   │   └── build.bat       One-click build script
 │   ├── tests/             774 pytest tests (51 files) covering all modules
+│   │   └── manual/        Ad-hoc test scripts
 │   └── config.py          Settings & env vars (Alpaca keys, DB path)
 ├── frontend/
 │   └── src/
@@ -94,12 +95,16 @@ trader/
 │       │                  PositionsTable, OrderHistory, StrategySelector
 │       ├── api/           HTTP client + WebSocket classes (BacktestSocket, LiveSocket)
 │       └── theme/         ThemeContext (dark/light mode with system preference detection)
+├── docs/                   Documentation
+│   ├── TSMOM.md            Time-Series Momentum framework
+│   ├── CPP_ACCELERATION.md C++ pybind11 kernel reference
+│   ├── PAIRS_DISCOVERY.md  Pairs discovery pipeline guide
+│   ├── STRATEGIES.md       All strategies reference
+│   ├── planning/           Archived planning documents
+│   └── reports/            Generated pairs reports
 ├── pyproject.toml          Pytest asyncio config
 ├── AGENTS.md               Agent instructions
-├── ML_AUDIT.md             ML audit log
-├── ML_PLAN.md              ML implementation plan & details
-├── PLAN.md                 Full architecture & build phases
-└── STAT_ARB_REFACTOR_PLAN.md  Statistical arbitrage refactoring plan
+├── README.md               Project overview (this file)
 ```
 
 ## Setup
@@ -164,6 +169,15 @@ cd frontend && npm run dev
 ```
 
 Open http://localhost:5173 in your browser.
+
+## Documentation
+
+| File | Contents |
+|------|----------|
+| `docs/TSMOM.md` | Time-Series Momentum framework — CLI, API, Python usage |
+| `docs/CPP_ACCELERATION.md` | C++ pybind11 kernel reference — build, API, examples |
+| `docs/PAIRS_DISCOVERY.md` | Pairs discovery pipeline — CLI, auto-discover, API |
+| `docs/STRATEGIES.md` | All 6 strategies — params, usage, how to add new ones |
 
 ## Testing
 

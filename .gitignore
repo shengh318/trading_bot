@@ -43,3 +43,11 @@ backend/data/cache/
 # Logs
 *.log
 logs/
+backend/ml/logs/
+
+# Generated reports
+docs/reports/
+
+# Cache artifacts
+backend/data/cache/
+*.parquet

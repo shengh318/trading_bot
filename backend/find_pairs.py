@@ -327,18 +327,26 @@ def find_pairs(
     # ── Phase 2: EG cointegration on filtered pairs ──
     _dbg(f"Phase 2: Testing {len(correlated_pairs)} pairs for cointegration ...")
 
-    # Use C++ engine if available, otherwise pure Python sequential
-    from .cpp_engine import test_coint_pairs
+    from .stats_arb.cointegration import CointegrationTester
 
     cointegrated: list[tuple[str, str, float, float]] = []
     corr_tickers = list(dict.fromkeys([t for p in correlated_pairs for t in (p[0], p[1])]))
     pair_prices = all_prices[[c for c in corr_tickers if c in all_prices.columns]].ffill()
 
-    results = test_coint_pairs(pair_prices, significance)
-    for r in results:
-        if r["is_cointegrated"]:
-            s = -np.log10(max(r["p_value"], 1e-15))
-            cointegrated.append((r["ticker_a"], r["ticker_b"], r["p_value"], s))
+    for a, b in correlated_pairs:
+        if a not in pair_prices.columns or b not in pair_prices.columns:
+            continue
+        pair_df = pair_prices[[a, b]].dropna(how="any")
+        if len(pair_df) < 50:
+            continue
+        try:
+            ct = CointegrationTester(pair_df, significance=significance)
+            res = ct.run()
+            if res.is_cointegrated:
+                s = -np.log10(max(res.p_value, 1e-15))
+                cointegrated.append((a, b, res.p_value, s))
+        except Exception:
+            continue
 
     cointegrated.sort(key=lambda x: x[3], reverse=True)
     _dbg(f"Phase 2: Found {len(cointegrated)} cointegrated pairs (p < {significance})")

@@ -122,9 +122,19 @@ backend/
 │   ├── test_bug_backtest_zero_price.py   (3)  — ZeroDivisionError on zero price
 │   ├── test_bug_metrics_zero_cash.py     (2)  — inf total_return_pct at zero cash
 │   ├── test_bug_ml_auc.py                (3)  — AUC always 0.0 from boolean → scaler
-│   └── test_bug_spread_zscore.py         (3)  — inf/nan z-scores on constant spread
+│   ├── test_bug_spread_zscore.py         (3)  — inf/nan z-scores on constant spread
+│   └── manual/               Ad-hoc test scripts
+│       ├── debug_c2.py       ML model save/load debug
+│       └── test_ws_backtest.py  WebSocket backtest test
 ├── config.py                 Settings: ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_PAPER, DB_PATH, validate_config()
-└── requirements.txt          fastapi, uvicorn, alpaca-py, pandas, numpy, scikit-learn, xgboost, lightgbm, yfinance, statsmodels, matplotlib, seaborn, scipy, pytest, httpx, websockets, pyarrow
+├── requirements.txt          fastapi, uvicorn, alpaca-py, pandas, numpy, scikit-learn, xgboost, lightgbm, yfinance, statsmodels, matplotlib, seaborn, scipy, pytest, httpx, websockets, pyarrow
+└── docs/                     Documentation
+    ├── TSMOM.md              Time-Series Momentum framework
+    ├── CPP_ACCELERATION.md   C++ pybind11 kernel reference
+    ├── PAIRS_DISCOVERY.md    Pairs discovery pipeline guide
+    ├── STRATEGIES.md         All strategies reference
+    ├── planning/             Archived planning documents
+    └── reports/              Generated pairs reports
 ```
 
 ```
