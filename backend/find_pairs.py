@@ -291,6 +291,34 @@ def find_pairs(
         except Exception:
             pass
 
+    # Fallback: if all parallel workers failed (common on Windows), run sequentially
+    if not cointegrated and coint_args:
+        logger.info("Phase 2 (fallback): retrying cointegration tests sequentially ...")
+        all_prices = _download_prices(tickers, start, end)
+        valid_cols = [c for c in all_prices.columns if c in tickers]
+        all_prices = all_prices[valid_cols].ffill()
+        for a, b, _ in correlated_pairs:
+            if a not in all_prices.columns or b not in all_prices.columns:
+                continue
+            try:
+                pair_prices = all_prices[[a, b]].dropna(how="any")
+                if len(pair_prices) < 50:
+                    continue
+                ratio = pair_prices[a] / pair_prices[b]
+                ratio_cv = ratio.std() / ratio.mean()
+                if not np.isfinite(ratio_cv) or ratio_cv < 0.001:
+                    continue
+                corr_val = pair_prices[a].corr(pair_prices[b])
+                if corr_val >= 0.99 or not np.isfinite(corr_val):
+                    continue
+                res = _run_coint_silent(pair_prices, significance)
+                if res.is_cointegrated:
+                    cointegrated.append((a, b, res.p_value, -np.log10(max(res.p_value, 1e-15))))
+            except Exception as e:
+                logger.debug(f"EG fallback failed {a}/{b}: {e}")
+        cointegrated.sort(key=lambda x: x[3], reverse=True)
+        logger.info(f"Phase 2 (fallback): Found {len(cointegrated)} cointegrated pairs (p < {significance})")
+
     logger.info(f"Phase 2: Found {len(cointegrated)} cointegrated pairs (p < {significance})")
 
     if not cointegrated:

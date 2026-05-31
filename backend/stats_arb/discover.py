@@ -29,6 +29,7 @@ from .config import (
     AUTO_DISCOVER_MIN_SHARPE,
     AUTO_DISCOVER_TOP_CANDIDATES,
     DEFAULT_SIGNIFICANCE,
+    DEFAULT_Z_ENTRY,
 )
 from .cointegration import CointegrationTester
 from .data import DataManager
@@ -202,10 +203,10 @@ def screen_pairs(
 
 
 def _analyze_single(args: tuple) -> Any:
-    a, b, start, end, sig, capital = args
+    a, b, start, end, sig, capital, z_entry = args
     try:
         analyzer = PairAnalyzer(
-            a, b, start, end, significance=sig, capital=capital,
+            a, b, start, end, significance=sig, capital=capital, z_entry=z_entry,
         )
         return analyzer.analyze()
     except Exception as e:
@@ -230,6 +231,7 @@ def auto_discover(
     output_json: bool = False,
     output_file: str | None = None,
     output_md: str | None = None,
+    z_entry: float = DEFAULT_Z_ENTRY,
 ) -> list[dict[str, Any]]:
     """Run the full auto-discovery pipeline.
 
@@ -290,7 +292,7 @@ def auto_discover(
     )
 
     pair_args = [
-        (a, b, start, end, significance, capital)
+        (a, b, start, end, significance, capital, z_entry)
         for a, b, _ in candidates
     ]
 
@@ -373,11 +375,11 @@ def _apply_filters(
         if orig is None:
             continue
 
-        bt = (
-            getattr(orig, "wf_backtest", None)
-            or getattr(orig, "in_sample_backtest", None)
-            or getattr(orig, "backtest", None)
-        )
+        bt_in_sample = getattr(orig, "in_sample_backtest", None) or getattr(orig, "backtest", None)
+        bt_wf = getattr(orig, "wf_backtest", None)
+        # Use in-sample backtest for filtering (WF is informational;
+        # it is often too harsh in trending markets and would gate valid candidates)
+        bt = bt_in_sample
         if bt is None:
             continue
 

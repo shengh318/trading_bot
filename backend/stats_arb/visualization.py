@@ -30,18 +30,24 @@ class Visualizer:
     Parameters
     ----------
     save_dir : str
-        Directory to save plots.
+        Directory to save plots (only created if ``save_plots=True``).
     style : str
         Matplotlib style.
+    save_plots : bool
+        If True, save figure PNGs to ``save_dir``.  If False (default),
+        figures are computed in memory and then closed without persisting.
     """
 
     def __init__(
         self,
         save_dir: str = "stats_arb_plots",
         style: str = "seaborn-v0_8-darkgrid",
+        save_plots: bool = False,
     ) -> None:
         self.save_dir = save_dir
-        os.makedirs(self.save_dir, exist_ok=True)
+        self.save_plots = save_plots
+        if self.save_plots:
+            os.makedirs(self.save_dir, exist_ok=True)
         try:
             plt.style.use(style)
         except Exception:
@@ -89,8 +95,11 @@ class Visualizer:
         norm.plot(ax=ax, title=f"Normalized Prices: {ticker_a} vs {ticker_b}")
         ax.set_ylabel("Normalized Price (base=1)")
         ax.axhline(1.0, color="gray", ls="--", alpha=0.5)
-        path = os.path.join(self.save_dir, f"{pfx}_prices.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_prices.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -104,8 +113,11 @@ class Visualizer:
         )
         ax.axhline(spread.mean() - 2 * spread.std(), color="g", ls="--", alpha=0.5)
         ax.legend()
-        path = os.path.join(self.save_dir, f"{pfx}_spread.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_spread.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -134,8 +146,11 @@ class Visualizer:
                     ax.scatter(exit_date, exit_z, color="red", s=30, marker="v", zorder=5)
 
         ax.legend(loc="best")
-        path = os.path.join(self.save_dir, f"{pfx}_zscore.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_zscore.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -150,8 +165,11 @@ class Visualizer:
         ax.set_title(f"Rolling Correlation: {result.ticker_a} vs {result.ticker_b}")
         ax.axhline(0, color="gray", ls="--", alpha=0.3)
         ax.legend()
-        path = os.path.join(self.save_dir, f"{pfx}_correlation.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_correlation.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -160,8 +178,11 @@ class Visualizer:
         if bt is None or not hasattr(bt, "equity_curve") or bt.equity_curve.empty:
             fig, ax = plt.subplots()
             ax.set_title("No backtest data")
-            path = os.path.join(self.save_dir, f"{pfx}_equity.png")
-            fig.savefig(path, bbox_inches="tight")
+            if self.save_plots:
+                path = os.path.join(self.save_dir, f"{pfx}_equity.png")
+                fig.savefig(path, bbox_inches="tight")
+            else:
+                path = ""
             plt.close(fig)
             return path
 
@@ -174,8 +195,11 @@ class Visualizer:
 
         self._mark_trades(ax, bt.trades, cum_ret)
         ax.legend(loc="best")
-        path = os.path.join(self.save_dir, f"{pfx}_equity.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_equity.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -184,8 +208,11 @@ class Visualizer:
         if bt is None or not hasattr(bt, "drawdown_series") or bt.drawdown_series.empty:
             fig, ax = plt.subplots()
             ax.set_title("No drawdown data")
-            path = os.path.join(self.save_dir, f"{pfx}_drawdown.png")
-            fig.savefig(path, bbox_inches="tight")
+            if self.save_plots:
+                path = os.path.join(self.save_dir, f"{pfx}_drawdown.png")
+                fig.savefig(path, bbox_inches="tight")
+            else:
+                path = ""
             plt.close(fig)
             return path
 
@@ -194,8 +221,11 @@ class Visualizer:
         ax.fill_between(bt.drawdown_series.index, 0, bt.drawdown_series.values, color="red", alpha=0.2)
         ax.set_ylabel("Drawdown (%)")
         ax.axhline(0, color="gray", ls="--")
-        path = os.path.join(self.save_dir, f"{pfx}_drawdown.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_drawdown.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -204,8 +234,11 @@ class Visualizer:
         if regime is None:
             fig, ax = plt.subplots()
             ax.set_title("No regime data")
-            path = os.path.join(self.save_dir, f"{pfx}_regime.png")
-            fig.savefig(path, bbox_inches="tight")
+            if self.save_plots:
+                path = os.path.join(self.save_dir, f"{pfx}_regime.png")
+                fig.savefig(path, bbox_inches="tight")
+            else:
+                path = ""
             plt.close(fig)
             return path
 
@@ -247,8 +280,11 @@ class Visualizer:
             axes[2].legend()
 
         plt.tight_layout()
-        path = os.path.join(self.save_dir, f"{pfx}_regime.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_regime.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -257,8 +293,11 @@ class Visualizer:
         if wf is None or not wf.folds:
             fig, ax = plt.subplots()
             ax.set_title("No walk-forward data")
-            path = os.path.join(self.save_dir, f"{pfx}_walk_forward.png")
-            fig.savefig(path, bbox_inches="tight")
+            if self.save_plots:
+                path = os.path.join(self.save_dir, f"{pfx}_walk_forward.png")
+                fig.savefig(path, bbox_inches="tight")
+            else:
+                path = ""
             plt.close(fig)
             return path
 
@@ -288,8 +327,11 @@ class Visualizer:
         axes[2].set_xlabel("Fold")
 
         plt.tight_layout()
-        path = os.path.join(self.save_dir, f"{pfx}_walk_forward.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_walk_forward.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -298,8 +340,11 @@ class Visualizer:
         if not ml:
             fig, ax = plt.subplots()
             ax.set_title("No ML data")
-            path = os.path.join(self.save_dir, f"{pfx}_ml_features.png")
-            fig.savefig(path, bbox_inches="tight")
+            if self.save_plots:
+                path = os.path.join(self.save_dir, f"{pfx}_ml_features.png")
+                fig.savefig(path, bbox_inches="tight")
+            else:
+                path = ""
             plt.close(fig)
             return path
 
@@ -307,10 +352,15 @@ class Visualizer:
         first_result = ml[first_key]
         importances = first_result.feature_importance
         if not importances:
-            path = os.path.join(self.save_dir, f"{pfx}_ml_features.png")
-            fig, ax = plt.subplots()
-            ax.set_title("No feature importance data")
-            fig.savefig(path, bbox_inches="tight")
+            if self.save_plots:
+                path = os.path.join(self.save_dir, f"{pfx}_ml_features.png")
+                fig, ax = plt.subplots()
+                ax.set_title("No feature importance data")
+                fig.savefig(path, bbox_inches="tight")
+            else:
+                path = ""
+                fig, ax = plt.subplots()
+                ax.set_title("No feature importance data")
             plt.close(fig)
             return path
 
@@ -326,8 +376,11 @@ class Visualizer:
         ax.invert_yaxis()
 
         plt.tight_layout()
-        path = os.path.join(self.save_dir, f"{pfx}_ml_features.png")
-        fig.savefig(path, bbox_inches="tight")
+        if self.save_plots:
+            path = os.path.join(self.save_dir, f"{pfx}_ml_features.png")
+            fig.savefig(path, bbox_inches="tight")
+        else:
+            path = ""
         plt.close(fig)
         return path
 
@@ -336,6 +389,7 @@ class Visualizer:
         matrix: pd.DataFrame,
         title: str = "Pairwise Cointegration Score (-log10 p-value)",
         save_path: str = "stats_arb_plots/cointegration_heatmap.png",
+        save_plots: bool = True,
     ) -> str:
         """Plot a heatmap of pairwise cointegration scores."""
         try:
@@ -344,7 +398,6 @@ class Visualizer:
             logger.warning("seaborn not available for heatmap")
             return ""
 
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         fig, ax = plt.subplots(
             figsize=(max(8, len(matrix) * 0.6), max(6, len(matrix) * 0.5))
         )
@@ -360,17 +413,19 @@ class Visualizer:
         )
         ax.set_title(title, fontsize=14)
         plt.tight_layout()
-        fig.savefig(save_path, bbox_inches="tight", dpi=150)
+        if save_plots:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            fig.savefig(save_path, bbox_inches="tight", dpi=150)
         plt.close(fig)
-        return save_path
+        return save_path if save_plots else ""
 
     @staticmethod
     def plot_ranking_summary(
         ranked_pairs: list[Any],
         save_path: str = "stats_arb_plots/ranking_summary.png",
+        save_plots: bool = True,
     ) -> str:
         """Plot a bar chart of top-ranked pairs."""
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         fig, ax = plt.subplots(figsize=(10, max(4, len(ranked_pairs) * 0.4)))
 
         names = [f"{p.ticker_a}/{p.ticker_b}" for p in ranked_pairs]
@@ -389,9 +444,11 @@ class Visualizer:
             ax.text(s + 0.01, i, f"{s:.3f}", va="center")
 
         plt.tight_layout()
-        fig.savefig(save_path, bbox_inches="tight")
+        if save_plots:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            fig.savefig(save_path, bbox_inches="tight")
         plt.close(fig)
-        return save_path
+        return save_path if save_plots else ""
 
     @staticmethod
     def _get_attr(obj: Any, attr: str, default: Any = None) -> Any:

@@ -8,7 +8,7 @@ def calculate_metrics(
     initial_cash: float,
     risk_free_rate: float = 0.0,
 ) -> dict:
-    if equity_curve.empty or len(equity_curve) == 0:
+    if equity_curve.empty or len(equity_curve) == 0 or "equity" not in equity_curve.columns:
         return {
             "total_return_pct": 0.0,
             "final_equity": initial_cash,
@@ -35,7 +35,7 @@ def calculate_metrics(
         gross_loss = abs(losing["pnl"].sum()) if not losing.empty else 0.0
 
         if gross_loss == 0:
-            profit_factor = float("inf") if gross_profit > 0 else 0.0
+            profit_factor = 999999.0 if gross_profit > 0 else 0.0
         else:
             profit_factor = gross_profit / gross_loss
 
@@ -46,11 +46,11 @@ def calculate_metrics(
         equity_curve = equity_curve.copy()
         equity_curve["return"] = equity_curve["equity"].pct_change().fillna(0)
         daily_returns = equity_curve["return"].values
-        n_bars = len(daily_returns)
-        annual_factor = np.sqrt(252 * n_bars / max(n_bars, 1))
+        annual_factor = np.sqrt(252)
 
         if daily_returns.std() > 0:
-            excess_returns = daily_returns - risk_free_rate / annual_factor
+            daily_rfr = risk_free_rate / 252
+            excess_returns = daily_returns - daily_rfr
             sharpe_ratio = float(
                 (excess_returns.mean() / excess_returns.std()) * annual_factor
             )
@@ -66,5 +66,5 @@ def calculate_metrics(
         "max_drawdown_pct": max_drawdown,
         "win_rate_pct": round(win_rate, 2),
         "num_trades": num_trades,
-        "profit_factor": profit_factor if profit_factor == float("inf") else round(profit_factor, 2),
+        "profit_factor": round(profit_factor, 2),
     }

@@ -21,6 +21,8 @@
 | Find pairs (auto) | `.venv\Scripts\python -m backend.find_pairs` | `.venv/bin/python -m backend.find_pairs` |
 | Find pairs (nasdaq100) | `.venv\Scripts\python -m backend.find_pairs nasdaq100` | `.venv/bin/python -m backend.find_pairs nasdaq100` |
 | Find pairs (custom + save) | `.venv\Scripts\python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` | `.venv/bin/python -m backend.find_pairs NVDA,AMD,KO,PEP -o pairs.md --min-sharpe 1.5` |
+| CorrCointStrategy tests | `.venv\Scripts\python -m pytest backend\tests\test_corr_coint_strat.py -v` | `.venv/bin/python -m pytest backend/tests/test_corr_coint_strat.py -v` |
+| CorrCointStrategy discovery | `.venv\Scripts\python -m backend.stats_arb.cli --auto-discover NVDA,AMD,INTC,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AVGO,CSCO,JPM,GS,KO,PEP --no-parallel --no-plots --output-md discover.md` | `.venv/bin/python -m backend.stats_arb.cli --auto-discover NVDA,AMD,INTC,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AVGO,CSCO,JPM,GS,KO,PEP --no-parallel --no-plots --output-md discover.md` |
 
 ## Project Structure
 
@@ -207,6 +209,7 @@ frontend/
 | `test_bug_metrics_zero_cash.py` | 2 | inf total_return_pct at zero cash |
 | `test_bug_ml_auc.py` | 3 | AUC always 0.0 from boolean → scaler |
 | `test_bug_spread_zscore.py` | 3 | inf/nan z-scores on constant spread |
+| `test_corr_coint_strat.py` | 21 | CorrCointStrategy: entry/exit, cooldown, correlation gate, partial exit, stop-loss, edge cases |
 | `test_correlation.py` | 35 | Correlation API endpoint |
 | `test_stats_arb.py` | 18 | Cointegration, ranking, strategy, walk-forward |
 

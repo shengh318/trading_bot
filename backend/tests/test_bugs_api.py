@@ -256,10 +256,10 @@ class TestBug5_ProfitFactorDefaultsToZero:
             max_drawdown_pct=5.0,
             win_rate_pct=100.0,
             num_trades=5,
-            profit_factor=float("inf"),
+            profit_factor=999999.0,
         )
-        assert metrics.profit_factor == float("inf"), (
-            "BacktestMetrics should support inf for profit_factor"
+        assert metrics.profit_factor == 999999.0, (
+            "BacktestMetrics should support sentinel for profit_factor"
         )
 
 

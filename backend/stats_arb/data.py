@@ -64,7 +64,7 @@ class DataManager:
         """
         logger.info(
             f"Downloading data: {', '.join(self.tickers)} "
-            f"[{self.start.date()} → {self.end.date()}]"
+            f"[{self.start.date()} -> {self.end.date()}]"
         )
 
         prices: pd.DataFrame | None = None

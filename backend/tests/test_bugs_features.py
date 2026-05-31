@@ -91,17 +91,17 @@ class TestM6_FillnaMasksWarmup:
             "volume": np.random.randint(5000, 20000, 100),
         }, index=pd.date_range("2025-01-01", periods=100, freq="D"))
 
-    def test_rsi_is_zero_during_warmup(self):
-        """M6: RSI should be 0 (not NaN, not 50) during warmup after clean_features."""
+    def test_rsi_is_neutral_during_warmup(self):
+        """M6: RSI should be 50 (neutral) during warmup, not NaN/0."""
         from backend.ml.features import compute_features
 
         data = self._make_data()
         result = compute_features(data.copy())
 
-        # First 14 bars of RSI are filled with 0 by clean_features (was NaN before)
+        # First 14 bars of RSI are filled with 50 by rs.fillna(1.0) → neutral
         first_14 = result["rsi"].iloc[:14]
-        assert (first_14 == 0.0).all(), (
-            "RSI should be 0 during warmup (not NaN, not 50)"
+        assert (first_14 == 50.0).all(), (
+            "RSI should be 50 during warmup (neutral, not NaN)"
         )
 
     def test_choppiness_is_zero_during_warmup(self):

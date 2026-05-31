@@ -130,12 +130,15 @@ def retrain_model(req: MlRetrainRequest):
     log_dir = Path(__file__).parent.parent / "ml" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"train_{name}.log"
-    proc = subprocess.Popen(
-        cmd,
-        stdout=open(log_file, "w"),
-        stderr=subprocess.STDOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=open(log_file, "w"),
+            stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start training: {e}")
     _active_pids[name] = proc.pid
     _save_pids(_active_pids)
     return MlRetrainResponse(

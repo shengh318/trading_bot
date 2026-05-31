@@ -53,7 +53,7 @@ def analyze_pair_cli(
     run_johansen: bool = True,
     run_kalman: bool = False,
     run_ml: bool = False,
-    save_plots: bool = True,
+    save_plots: bool = False,
     output_json: bool = False,
     capital: float = 100_000.0,
 ) -> PairAnalysisResult:
@@ -63,7 +63,7 @@ def analyze_pair_cli(
 
     logger.info(f"{'='*60}")
     logger.info(f"Analyzing pair: {ticker_a} / {ticker_b}")
-    logger.info(f"Period: {start} → {end}")
+    logger.info(f"Period: {start} -> {end}")
     logger.info(f"{'='*60}")
 
     analyzer = PairAnalyzer(
@@ -287,6 +287,8 @@ Examples:
                         help=f"Minimum total return %% filter (default: {AUTO_DISCOVER_MIN_RETURN_PCT})")
     parser.add_argument("--max-drawdown-pct", type=float, default=AUTO_DISCOVER_MAX_DRAWDOWN_PCT,
                         help=f"Maximum drawdown %% filter (default: {AUTO_DISCOVER_MAX_DRAWDOWN_PCT})")
+    parser.add_argument("--z-entry", type=float, default=DEFAULT_Z_ENTRY,
+                        help=f"Z-score entry threshold (default: {DEFAULT_Z_ENTRY})")
     parser.add_argument("--require-mean-reverting", action="store_true",
                         help="Only keep pairs in mean-reverting regime")
     parser.add_argument("--require-no-breaks", action="store_true",
@@ -325,8 +327,10 @@ Examples:
             tickers, args.start, args.end, args.significance,
             parallel=not args.no_parallel,
         )
-        path = Visualizer.plot_cointegration_heatmap(matrix)
-        logger.info(f"Heatmap saved: {path}")
+        save_plots = not args.no_plots
+        if save_plots:
+            path = Visualizer.plot_cointegration_heatmap(matrix)
+            logger.info(f"Heatmap saved: {path}")
         print("\nCointegration Score Matrix (-log10 p-value):")
         print(matrix.round(2).to_string())
         return
@@ -366,6 +370,7 @@ Examples:
             output_json=args.json,
             output_file=args.output_md.replace(".md", ".json") if args.output_md and args.json else None,
             output_md=args.output_md,
+            z_entry=args.z_entry,
         )
         return
 

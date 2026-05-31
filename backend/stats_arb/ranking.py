@@ -123,7 +123,7 @@ class PairRanker:
         "oos_robustness": 0.10,
         "regime_consistency": 0.10,
         "correlation_stability": 0.05,
-        "structural_break_frequency": 0.08,
+        "structural_break_frequency": 0.03,
     }
 
     def __init__(
@@ -305,12 +305,12 @@ class PairRanker:
     def _classify_risk(components: dict[str, float]) -> str:
         hurst = components.get("hurst", 0.5)
         dd = components.get("max_drawdown", 0.5)
-        combined = (1.0 - hurst) * 0.5 + (1.0 - dd) * 0.5
-        if combined >= 0.6:
-            return "low"
-        if combined >= 0.3:
+        badness = (1.0 - hurst) * 0.5 + (1.0 - dd) * 0.5
+        if badness >= 0.6:
+            return "high"
+        if badness >= 0.3:
             return "medium"
-        return "high"
+        return "low"
 
     @staticmethod
     def _safe_get(obj: Any, attr: str, default: Any = None) -> Any:

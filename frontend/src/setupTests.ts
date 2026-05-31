@@ -14,6 +14,7 @@ vi.mock("lightweight-charts", () => {
     timeScale: vi.fn(() => ({
       fitContent: vi.fn(),
       applyOptions: vi.fn(),
+      setVisibleLogicalRange: vi.fn(),
     })),
   };
   return {

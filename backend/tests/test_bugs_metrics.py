@@ -94,29 +94,27 @@ class TestL13_ProfitFactorInfNotPortable:
 
         metrics = calculate_metrics(equity, trades, initial_cash=10000.0)
 
-        # The metrics dict returns inf for profit_factor when gross_loss == 0
-        # SQLite stores this as null, other DBs may fail
-        assert metrics["profit_factor"] == float("inf")
+        # The metrics dict returns a large sentinel for profit_factor when gross_loss == 0
+        assert metrics["profit_factor"] == 999999.0
 
         # Check that the value is handled when saving to DB
-        # (This is a design issue, not easily testable without mocking the DB)
 
 
-# ── Bug 4: profit_factor == float("inf") is stored in DB as None ──
+# ── Bug 4: profit_factor == float("inf") is stored in DB as None (FIXED) ──
 
 
 class TestBug4_ProfitFactorInfToDB:
-    """Bug 4: profit_factor=inf in metrics becomes None in DB via save_backtest_run."""
+    """Bug 4: profit_factor=inf now replaced with 999999.0 sentinel."""
 
-    def test_calculate_metrics_returns_none_for_inf_profit_factor(self):
-        """Bug 4: calculate_metrics converts float('inf') to None in the returned dict."""
+    def test_calculate_metrics_returns_sentinel_for_inf_profit_factor(self):
+        """Bug 4: calculate_metrics now returns 999999.0 instead of float('inf')."""
         from backend.backtest.metrics import calculate_metrics
 
         equity = pd.DataFrame({
             "equity": [10000.0, 11000.0, 12000.0],
             "cash": [10000.0] * 3,
         })
-        # All winning trades, no losing trades → profit_factor = inf
+        # All winning trades, no losing trades → profit_factor should be a sentinel
         trades = pd.DataFrame({
             "bar_index": [1, 2],
             "timestamp": ["2025-01-02", "2025-01-03"],
@@ -129,11 +127,9 @@ class TestBug4_ProfitFactorInfToDB:
 
         metrics = calculate_metrics(equity, trades, initial_cash=10000.0)
 
-        # Bug: metrics dict returns None instead of inf for profit_factor
-        # line 69: "profit_factor": None if profit_factor == float("inf") else round(profit_factor, 2)
-        # After fix: should store inf or a sentinel that round-trips correctly
-        assert metrics["profit_factor"] is None or metrics["profit_factor"] == float("inf"), (
-            "profit_factor should be None (current) or inf (after fix)"
+        # After fix: should return a serializable sentinel instead of inf
+        assert metrics["profit_factor"] == 999999.0, (
+            "profit_factor should be 999999.0 sentinel (instead of inf)"
         )
 
     def test_db_save_backtest_run_preserves_profit_factor(self):
@@ -155,15 +151,14 @@ class TestBug4_ProfitFactorInfToDB:
             "max_drawdown": 5.0,
             "win_rate": 100.0,
             "num_trades": 2,
-            "profit_factor": None,
+            "profit_factor": 999999.0,
         })
 
         saved = db.get_backtest_run_by_id(run_id)
         assert saved is not None
-        # Bug: SQLite can't store inf, so None gets stored as SQL NULL
-        # After fix: profit_factor should be a finite number or None
-        assert saved["profit_factor"] is None, (
-            "profit_factor=None should be stored as SQL NULL"
+        # After fix: profit_factor should be a finite serializable number
+        assert saved["profit_factor"] == 999999.0, (
+            "profit_factor=999999.0 should be stored and retrieved correctly"
         )
 
         db.close()

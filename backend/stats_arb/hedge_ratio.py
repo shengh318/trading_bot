@@ -43,20 +43,25 @@ def estimate_ols(
     float
         The hedge ratio (slope coefficient).
     """
+    mask = np.isfinite(a) & np.isfinite(b)
+    if mask.sum() < 2:
+        return 0.0
+    a_clean = a[mask]
+    b_clean = b[mask]
     if robust:
         from sklearn.linear_model import HuberRegressor
-        b_reshaped = b.reshape(-1, 1)
+        b_reshaped = b_clean.reshape(-1, 1)
         if add_const:
             model = HuberRegressor(fit_intercept=True)
         else:
             model = HuberRegressor(fit_intercept=False)
-        model.fit(b_reshaped, a)
+        model.fit(b_reshaped, a_clean)
         return float(model.coef_[0])
     if add_const:
-        b_with_const = np.column_stack([np.ones_like(b), b])
-        beta, _, _, _ = np.linalg.lstsq(b_with_const, a, rcond=None)
+        b_with_const = np.column_stack([np.ones_like(b_clean), b_clean])
+        beta, _, _, _ = np.linalg.lstsq(b_with_const, a_clean, rcond=None)
         return float(beta[1])
-    beta, _, _, _ = np.linalg.lstsq(b.reshape(-1, 1), a, rcond=None)
+    beta, _, _, _ = np.linalg.lstsq(b_clean.reshape(-1, 1), a_clean, rcond=None)
     return float(beta[0])
 
 

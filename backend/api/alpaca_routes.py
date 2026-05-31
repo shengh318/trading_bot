@@ -69,14 +69,17 @@ def alpaca_orders(limit: int = 25):
 
 @alpaca_router.get("/api/alpaca/portfolio-history")
 def alpaca_portfolio_history(period: str = "1M", timeframe: str = "1D"):
+    from alpaca.trading.requests import GetPortfolioHistoryRequest
     client = _get_client()
-    params = {"period": period, "timeframe": timeframe}
     try:
-        history = client.get("/account/portfolio/history", params)
+        req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
+        history = client.get_portfolio_history(req)
     except Exception:
         return []
-    timestamps = history.get("timestamp", []) if isinstance(history, dict) else []
-    equities = history.get("equity", []) if isinstance(history, dict) else []
+    if history is None:
+        return []
+    timestamps = list(history.timestamp) if hasattr(history, "timestamp") else []
+    equities = list(history.equity) if hasattr(history, "equity") else []
     return [
         {
             "timestamp": ts,

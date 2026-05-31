@@ -97,33 +97,38 @@ class BacktestResult:
     tracking_error: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        def _safe_round(v: float, ndigits: int) -> float:
+            if np.isfinite(v):
+                return round(v, ndigits)
+            return v
+
         trades_dict = []
         for t in self.trades:
             if hasattr(t, "to_dict"):
                 trades_dict.append(t.to_dict())
             elif isinstance(t, dict):
-                trades_dict.append({k: round(v, 4) if isinstance(v, float) else v for k, v in t.items()})
+                trades_dict.append({k: _safe_round(v, 4) if isinstance(v, float) else v for k, v in t.items()})
         return {
-            "total_return_pct": round(self.total_return_pct, 2),
-            "annualised_return_pct": round(self.annualised_return_pct, 2),
-            "sharpe_ratio": round(self.sharpe_ratio, 4),
-            "sortino_ratio": round(self.sortino_ratio, 4),
-            "calmar_ratio": round(self.calmar_ratio, 4),
-            "max_drawdown_pct": round(self.max_drawdown_pct, 2),
-            "win_rate_pct": round(self.win_rate_pct, 2),
+            "total_return_pct": _safe_round(self.total_return_pct, 2),
+            "annualised_return_pct": _safe_round(self.annualised_return_pct, 2),
+            "sharpe_ratio": _safe_round(self.sharpe_ratio, 4),
+            "sortino_ratio": _safe_round(self.sortino_ratio, 4),
+            "calmar_ratio": _safe_round(self.calmar_ratio, 4),
+            "max_drawdown_pct": _safe_round(self.max_drawdown_pct, 2),
+            "win_rate_pct": _safe_round(self.win_rate_pct, 2),
             "num_trades": self.num_trades,
-            "avg_holding_period": round(self.avg_holding_period, 2),
-            "turnover": round(self.turnover, 4),
-            "final_equity": round(self.final_equity, 2),
-            "avg_win_pct": round(self.avg_win_pct, 2),
-            "avg_loss_pct": round(self.avg_loss_pct, 2),
-            "profit_factor": round(self.profit_factor, 4),
-            "exposure_pct": round(self.exposure_pct, 2),
-            "beta_to_market": round(self.beta_to_market, 4),
-            "alpha": round(self.alpha, 4),
-            "beta": round(self.beta, 4),
-            "information_ratio": round(self.information_ratio, 4),
-            "tracking_error": round(self.tracking_error, 4),
+            "avg_holding_period": _safe_round(self.avg_holding_period, 2),
+            "turnover": _safe_round(self.turnover, 4),
+            "final_equity": _safe_round(self.final_equity, 2),
+            "avg_win_pct": _safe_round(self.avg_win_pct, 2),
+            "avg_loss_pct": _safe_round(self.avg_loss_pct, 2),
+            "profit_factor": _safe_round(self.profit_factor, 4),
+            "exposure_pct": _safe_round(self.exposure_pct, 2),
+            "beta_to_market": _safe_round(self.beta_to_market, 4),
+            "alpha": _safe_round(self.alpha, 4),
+            "beta": _safe_round(self.beta, 4),
+            "information_ratio": _safe_round(self.information_ratio, 4),
+            "tracking_error": _safe_round(self.tracking_error, 4),
             "num_trades_detail": len(trades_dict),
         }
 
@@ -173,13 +178,22 @@ class BacktestEngine:
 
         initial = self.initial_capital
         final = float(self.equity.iloc[-1])
-        total_ret = (final - initial) / initial * 100
+
+        if initial == 0:
+            total_ret = 0.0
+        else:
+            total_ret = (final - initial) / initial * 100
 
         years = len(self.equity) / self.annual_factor
-        if years > 0 and (1 + total_ret / 100) > 0:
-            annual_ret = ((1 + total_ret / 100) ** (1 / years) - 1) * 100
+        if years > 0 and total_ret > -100 and np.isfinite(total_ret):
+            try:
+                annual_ret = ((1 + total_ret / 100) ** (1 / years) - 1) * 100
+            except (OverflowError, ValueError):
+                annual_ret = 1e100 if total_ret > 0 else -100.0
         else:
             annual_ret = total_ret / max(years, 0.01) if years > 0 else 0.0
+        if not np.isfinite(annual_ret):
+            annual_ret = 1e100 if total_ret > 0 else -100.0
 
         daily_returns = self.equity.pct_change().dropna()
 
@@ -213,7 +227,7 @@ class BacktestEngine:
                 min(0, self._get_attr(t, "pnl", 0)) for t in self.trades
             )
         )
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf") if gross_profit > 0 else 0.0
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else (999999.0 if gross_profit > 0 else 0.0)
 
         exposure = self._compute_exposure()
         beta = self._compute_beta(daily_returns)
@@ -222,9 +236,11 @@ class BacktestEngine:
         information_ratio = 0.0
         tracking_error = 0.0
         benchmark_beta = 0.0
-        if self.market_returns is not None and len(daily_returns) > 10:
-            aligned = pd.concat([daily_returns, self.market_returns], axis=1).dropna()
-            if len(aligned) > 10:
+
+        market_ret = self._compute_market_returns()
+        if market_ret is not None and len(daily_returns) > 2:
+            aligned = pd.concat([daily_returns, market_ret], axis=1).dropna()
+            if len(aligned) > 2:
                 strat_ret = aligned.iloc[:, 0]
                 bench_ret = aligned.iloc[:, 1]
                 excess = strat_ret - bench_ret
@@ -263,15 +279,21 @@ class BacktestEngine:
         )
 
     def _compute_sharpe(self, returns: pd.Series) -> float:
-        if returns.std() == 0 or returns.isnull().all():
+        if len(returns) < 2 or returns.std() == 0 or returns.isnull().all():
             return 0.0
-        return float(returns.mean() / returns.std() * math.sqrt(self.annual_factor))
+        std = float(returns.std())
+        return 0.0 if std == 0 or not np.isfinite(std) else float(returns.mean() / std * math.sqrt(self.annual_factor))
 
     def _compute_sortino(self, returns: pd.Series) -> float:
-        downside = returns[returns < 0]
-        if len(downside) < 2 or downside.std() == 0:
+        if len(returns) < 2 or returns.isnull().all():
             return 0.0
-        return float(returns.mean() / downside.std() * math.sqrt(self.annual_factor))
+        mean_return = float(returns.mean())
+        downside = returns.copy()
+        downside[downside > 0] = 0.0
+        downside_dev = np.sqrt(np.mean(downside ** 2))
+        if downside_dev == 0 or not np.isfinite(downside_dev):
+            return 0.0
+        return float(mean_return / downside_dev * math.sqrt(self.annual_factor))
 
     @staticmethod
     def _compute_drawdown(equity: pd.Series) -> tuple[float, pd.Series]:
@@ -308,13 +330,24 @@ class BacktestEngine:
         )
         return min(100.0, float(trading_days / total_days * 100))
 
-    def _compute_beta(self, strategy_returns: pd.Series) -> float:
+    def _compute_market_returns(self) -> pd.Series | None:
         if self.market_returns is None:
+            return None
+        mr = self.market_returns.dropna()
+        if len(mr) < 2:
+            return None
+        if mr.iloc[0] > 1 and mr.iloc[0] < 1e6:
+            mr = mr.pct_change().dropna()
+        return mr
+
+    def _compute_beta(self, strategy_returns: pd.Series) -> float:
+        market_ret = self._compute_market_returns()
+        if market_ret is None:
             return 0.0
         aligned = pd.concat(
-            [strategy_returns, self.market_returns], axis=1
+            [strategy_returns, market_ret], axis=1
         ).dropna()
-        if len(aligned) < 10:
+        if len(aligned) < 3:
             return 0.0
         cov = float(aligned.iloc[:, 0].cov(aligned.iloc[:, 1]))
         var = float(aligned.iloc[:, 1].var())

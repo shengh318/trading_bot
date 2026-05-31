@@ -1,6 +1,7 @@
 from typing import Any, Optional
 
 from backend.strategies.base import Strategy
+from backend.strategies.corr_coint_strat import CorrCointStrategy
 from backend.strategies.ml_strategy import MLStrategy
 from backend.strategies.sma_crossover import SmaCrossover
 from backend.strategies.simple_strat_1 import SimpleStrat1
@@ -36,6 +37,28 @@ _REGISTRY: dict[str, dict] = {
             {"name": "sell_portion", "type": "float", "default": 100.0},
             {"name": "stop_loss", "type": "float", "default": 3.0},
             {"name": "max_buys", "type": "int", "default": 1},
+        ],
+    },
+    "CorrCointStrategy": {
+        "class": CorrCointStrategy,
+        "description": "Pairs mean-reversion trading using correlation + cointegration. Enters long/short spread when z-score deviates, exits on mean reversion, partial profit-taking, stop-loss, or time limit. Supports graduated entry, volatility scaling, P&L stop, half-life weighting, hedge ratio drift rebalancing, and cooldown.",
+        "params": [
+            {"name": "symbol_b", "type": "str", "default": ""},
+            {"name": "hedge_ratio", "type": "float", "default": 1.0},
+            {"name": "half_life", "type": "float", "default": 20.0},
+            {"name": "z_entry_strong", "type": "float", "default": 2.0},
+            {"name": "z_entry_weak", "type": "float", "default": 1.5},
+            {"name": "z_exit_full", "type": "float", "default": 0.0},
+            {"name": "z_exit_partial", "type": "float", "default": 0.5},
+            {"name": "z_stop", "type": "float", "default": 2.5},
+            {"name": "max_holding_days", "type": "int", "default": 40},
+            {"name": "volatility_adjust", "type": "bool", "default": True},
+            {"name": "min_corr_gate", "type": "float", "default": 0.5},
+            {"name": "max_consecutive_losses", "type": "int", "default": 3},
+            {"name": "cooldown_days", "type": "int", "default": 10},
+            {"name": "base_pair_capital", "type": "float", "default": 10000.0},
+            {"name": "max_loss_pct", "type": "float", "default": 5.0},
+            {"name": "hedge_ratio_window", "type": "int", "default": 60},
         ],
     },
 }

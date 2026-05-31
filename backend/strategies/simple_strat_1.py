@@ -64,7 +64,7 @@ class SimpleStrat1(Strategy):
                 return Signal.SELL
 
         if avg_entry == 0 or position <= 0:
-            drop_from_open = (self._day_open - close) / self._day_open * 100
+            drop_from_open = (self._day_open - close) / self._day_open * 100 if self._day_open != 0 else 0.0
             if drop_from_open >= self.entry_drop:
                 return Signal.BUY
         else:

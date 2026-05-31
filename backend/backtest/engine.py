@@ -319,6 +319,7 @@ class MultiSymbolBacktestEngine:
         snapshots: list[dict] = []
         timestamps = self._get_union_timestamps()
         local_idx: dict[str, int] = {sym: -1 for sym in self.symbols}
+        last_prices: dict[str, float] = {}
 
         for global_i, ts in enumerate(timestamps):
             ts = pd.Timestamp(ts)
@@ -329,6 +330,7 @@ class MultiSymbolBacktestEngine:
                 local_idx[sym] += 1
                 i = local_idx[sym]
                 price = float(self.data[sym].loc[ts, "close"])
+                last_prices[sym] = price
 
                 self._apply_dividend(sym, ts)
                 signal = self.strategies[sym].next(i, self.data[sym], self.portfolio)
@@ -397,9 +399,9 @@ class MultiSymbolBacktestEngine:
                         })
 
             equity = self.portfolio.cash + sum(
-                self.portfolio.positions.get(sym, 0) * float(self.data[sym].loc[ts, "close"])
+                self.portfolio.positions.get(sym, 0) * last_prices.get(sym, 0.0)
                 for sym in self.symbols
-                if ts in self.data[sym].index and self.portfolio.positions.get(sym, 0) > 0
+                if self.portfolio.positions.get(sym, 0) > 0
             )
 
             snapshots.append({
@@ -426,6 +428,7 @@ class MultiSymbolBacktestEngine:
         self.portfolio = Portfolio(self.initial_cash)
         timestamps = self._get_union_timestamps()
         local_idx: dict[str, int] = {sym: -1 for sym in self.symbols}
+        last_prices: dict[str, float] = {}
 
         for global_i, ts in enumerate(timestamps):
             ts = pd.Timestamp(ts)
@@ -439,6 +442,7 @@ class MultiSymbolBacktestEngine:
                 local_idx[sym] += 1
                 i = local_idx[sym]
                 price = float(self.data[sym].loc[ts, "close"])
+                last_prices[sym] = price
 
                 div_amount = self._apply_dividend(sym, ts)
                 if div_amount > 0:
@@ -516,9 +520,9 @@ class MultiSymbolBacktestEngine:
                         })
 
             equity = self.portfolio.cash + sum(
-                self.portfolio.positions.get(sym, 0) * float(self.data[sym].loc[ts, "close"])
+                self.portfolio.positions.get(sym, 0) * last_prices.get(sym, 0.0)
                 for sym in self.symbols
-                if ts in self.data[sym].index and self.portfolio.positions.get(sym, 0) > 0
+                if self.portfolio.positions.get(sym, 0) > 0
             )
 
             snapshot = {

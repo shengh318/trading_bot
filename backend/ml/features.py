@@ -31,18 +31,41 @@ def clean_features(df: pd.DataFrame, fill_val: float = 0.0) -> pd.DataFrame:
 
 
 def _hurst_exponent(ts: np.ndarray) -> float:
-    """Compute Hurst exponent via rescaled range (R/S) method."""
+    """Compute Hurst exponent via multi-lag rescaled range (R/S) regression.
+
+    Regresses log(E[R/S]) vs log(lag) across multiple lags.
+    H < 0.5 → mean-reverting, H = 0.5 → random walk, H > 0.5 → trending.
+    """
     if len(ts) < 20:
         return 0.5
     ts = np.asarray(ts, dtype=float)
-    mean = np.nanmean(ts)
-    deviations = ts - mean
-    cumsum = np.nancumsum(deviations)
-    r = np.nanmax(cumsum) - np.nanmin(cumsum)
-    s = np.nanstd(ts)
-    if s <= _EPS or r <= _EPS:
+    if np.nanmin(ts) == np.nanmax(ts):
         return 0.5
-    return np.log(r / s) / np.log(len(ts))
+    max_lag = len(ts) // 2
+    if max_lag < 3:
+        return 0.5
+    lags = range(2, max_lag)
+    tau: list[float] = []
+    for lag in lags:
+        chunks = len(ts) // lag
+        if chunks < 1:
+            continue
+        trimmed = ts[: chunks * lag]
+        reshaped = trimmed.reshape((chunks, lag))
+        mean_adj = reshaped - reshaped.mean(axis=1, keepdims=True)
+        cumsum = mean_adj.cumsum(axis=1)
+        rs = (cumsum.max(axis=1) - cumsum.min(axis=1)) / reshaped.std(axis=1, ddof=0)
+        rs = rs[~np.isnan(rs)]
+        if len(rs) > 0:
+            tau.append(float(rs.mean()))
+    if len(tau) < 3:
+        return 0.5
+    lags_used = list(lags[: len(tau)])
+    if len(lags_used) < 3:
+        return 0.5
+    reg = np.polyfit(np.log(lags_used), np.log(tau), 1)
+    h = float(reg[0])
+    return max(0.0, min(1.0, h))
 
 
 def compute_features(data: pd.DataFrame) -> pd.DataFrame:
@@ -89,7 +112,10 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     loss = -delta.clip(upper=0)
     avg_gain = gain.rolling(14).mean()
     avg_loss = loss.rolling(14).mean()
-    rs = safe_divide(avg_gain, avg_loss)
+    # When avg_loss = 0 and avg_gain > 0, RS = inf → RSI = 100 (correct).
+    # When both = 0 (flat prices), RS = NaN → fill with 1 → RSI = 50.
+    rs = avg_gain / avg_loss
+    rs = rs.fillna(1.0)
     data["rsi"] = 100 - (100 / (1 + rs))
 
     # --- MACD ---
@@ -180,7 +206,11 @@ def compute_features(data: pd.DataFrame) -> pd.DataFrame:
     raw_mf = typical_price * volume
     pos_mf = raw_mf.where(typical_price > typical_price.shift(1), 0).rolling(14).sum()
     neg_mf = raw_mf.where(typical_price < typical_price.shift(1), 0).rolling(14).sum()
-    data["mfi"] = 100 - safe_divide(100, 1 + safe_divide(pos_mf, neg_mf))
+    # When neg_mf = 0 and pos_mf > 0, MFR = inf → MFI = 100 (correct).
+    # When both = 0 (flat prices), MFR = NaN → fill with 1 → MFI = 50.
+    mfr = pos_mf / neg_mf
+    mfr = mfr.fillna(1.0)
+    data["mfi"] = 100 - (100 / (1 + mfr))
 
     # --- Lag features ---
     data["ret_1_lag1"] = data["ret_1"].shift(1)

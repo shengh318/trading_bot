@@ -33,6 +33,9 @@ frontend/dist/
 *.db-wal
 *.sqlite
 
+# ML model files (generated)
+*.joblib
+
 # Data cache
 backend/data/cache/
 

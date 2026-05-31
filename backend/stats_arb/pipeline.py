@@ -184,12 +184,13 @@ class PairAnalyzer:
         end: str | datetime | None = None,
         significance: float = DEFAULT_SIGNIFICANCE,
         use_purged_walk_forward: bool = True,
-        run_johansen: bool = True,
+        run_johansen: bool = False,
         run_kalman: bool = False,
         run_ml: bool = False,
         hedge_ratio_method: str = "ols",
-        prices: Optional[pd.DataFrame] = None,
+        prices: pd.DataFrame | None = None,
         capital: float = 100_000.0,
+        z_entry: float = DEFAULT_Z_ENTRY,
     ) -> None:
         self.ticker_a = ticker_a.upper()
         self.ticker_b = ticker_b.upper()
@@ -203,6 +204,7 @@ class PairAnalyzer:
         self.hedge_ratio_method = hedge_ratio_method
         self._prices = prices
         self.capital = capital
+        self.z_entry = z_entry
 
     def analyze(self) -> PairAnalysisResult:
         prices = self._get_prices()
@@ -332,6 +334,7 @@ class PairAnalyzer:
             prices,
             hedge_ratio=beta,
             initial_capital=self.capital,
+            z_entry=self.z_entry,
         )
         equity, trades = strategy.execute()
         engine = BacktestEngine(equity, trades, self.capital)
@@ -342,6 +345,7 @@ class PairAnalyzer:
             wfbt = WalkForwardBacktest(
                 prices,
                 initial_capital=self.capital,
+                z_entry=self.z_entry,
             )
             return wfbt.run()
         except Exception as e:

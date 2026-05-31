@@ -100,7 +100,7 @@ def test_profit_factor_all_wins():
         "pnl": [200.0, 300.0],
     })
     metrics = calculate_metrics(equity, trades, initial_cash=10000.0)
-    assert metrics["profit_factor"] == float("inf")
+    assert metrics["profit_factor"] == 999999.0
 
 
 def test_no_trades():

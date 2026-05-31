@@ -277,7 +277,9 @@ class WalkForwardValidator:
         if theta_val >= 0:
             return float("inf")
         hl = -math.log(2) / theta_val
-        return float(hl) if np.isfinite(hl) else float("inf")
+        if not np.isfinite(hl) or hl > 1e6:
+            return float("inf")
+        return float(hl)
 
     @staticmethod
     def _compute_spread_sharpe(spread: np.ndarray) -> float:

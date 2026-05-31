@@ -78,20 +78,25 @@ class SpreadResult:
     variance_explosion_events: int = 0
 
     def to_dict(self) -> dict[str, Any]:
+        def _safe_round(v: float, ndigits: int) -> float:
+            if np.isfinite(v):
+                return round(v, ndigits)
+            return v
+
         return {
-            "mean": round(self.mean, 6),
-            "std": round(self.std, 6),
-            "current_zscore": round(self.current_zscore, 4),
-            "half_life": round(self.half_life, 2),
-            "hurst_exponent": round(self.hurst_exponent, 4),
-            "adf_statistic": round(self.adf_statistic, 4),
-            "adf_pvalue": round(self.adf_pvalue, 6),
+            "mean": _safe_round(self.mean, 6),
+            "std": _safe_round(self.std, 6),
+            "current_zscore": _safe_round(self.current_zscore, 4),
+            "half_life": _safe_round(self.half_life, 2),
+            "hurst_exponent": _safe_round(self.hurst_exponent, 4),
+            "adf_statistic": _safe_round(self.adf_statistic, 4),
+            "adf_pvalue": _safe_round(self.adf_pvalue, 6),
             "is_stationary": self.is_stationary,
-            "mean_reversion_speed": round(self.mean_reversion_speed, 6),
-            "expected_time_to_mean": round(self.expected_time_to_mean, 2),
-            "persistence": round(self.persistence, 4),
-            "spread_autocorr_5": round(self.spread_autocorr_5, 4),
-            "variance_ratio": round(self.variance_ratio, 4),
+            "mean_reversion_speed": _safe_round(self.mean_reversion_speed, 6),
+            "expected_time_to_mean": _safe_round(self.expected_time_to_mean, 2),
+            "persistence": _safe_round(self.persistence, 4),
+            "spread_autocorr_5": _safe_round(self.spread_autocorr_5, 4),
+            "variance_ratio": _safe_round(self.variance_ratio, 4),
             "variance_explosion_events": self.variance_explosion_events,
         }
 
@@ -118,6 +123,9 @@ class SpreadAnalyzer:
 
     def run(self) -> SpreadResult:
         spread = self.spread
+        if len(spread) == 0:
+            return self._empty_result()
+
         mean = float(spread.mean())
         std = float(spread.std())
         zscore_series = (spread - mean) / std if std > 0 else pd.Series(0.0, index=spread.index)
@@ -126,18 +134,21 @@ class SpreadAnalyzer:
         half_life = self._estimate_half_life(spread.values)
         hurst_exp = self._hurst_exponent(spread.values)
 
-        if spread.nunique() <= 1:
+        if spread.nunique() <= 1 or len(spread) < 10:
             adf_stat, adf_p = 0.0, 1.0
             is_stationary = False
         else:
-            adf_full = adfuller(spread.values, maxlag=1, autolag="AIC")
+            maxlag = min(1, len(spread) // 4)
+            adf_full = adfuller(spread.values, maxlag=maxlag, autolag="AIC")
             adf_stat, adf_p = float(adf_full[0]), float(adf_full[1])
             is_stationary = bool(adf_p < 0.05)
 
         speed = self._ou_mean_reversion_speed(spread.values)
         expected_time = self._expected_time_to_mean(current_zscore, speed) if speed < 0 else float("inf")
         persistence = float(spread.autocorr(lag=1)) if len(spread) > 2 else 0.0
+        persistence = 0.0 if not np.isfinite(persistence) else persistence
         autocorr_5 = float(spread.autocorr(lag=5)) if len(spread) > 5 else 0.0
+        autocorr_5 = 0.0 if not np.isfinite(autocorr_5) else autocorr_5
         var_ratio = self._variance_ratio(spread.values)
 
         rolling_vol = spread.rolling(63).std()
@@ -163,6 +174,27 @@ class SpreadAnalyzer:
             spread_autocorr_5=autocorr_5,
             variance_ratio=var_ratio,
             variance_explosion_events=variance_explosion_events,
+        )
+
+    def _empty_result(self) -> SpreadResult:
+        index = pd.Index([], dtype=float)
+        return SpreadResult(
+            mean=0.0,
+            std=0.0,
+            current_zscore=0.0,
+            zscore_series=pd.Series(dtype=float, index=index),
+            spread=pd.Series(dtype=float, index=index),
+            half_life=float("inf"),
+            hurst_exponent=0.5,
+            adf_statistic=0.0,
+            adf_pvalue=1.0,
+            is_stationary=False,
+            mean_reversion_speed=0.0,
+            expected_time_to_mean=float("inf"),
+            persistence=0.0,
+            spread_autocorr_5=0.0,
+            variance_ratio=1.0,
+            variance_explosion_events=0,
         )
 
     @staticmethod

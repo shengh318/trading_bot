@@ -314,7 +314,7 @@ def _resolve_profit_factor(row: dict) -> float:
     num_trades = row.get("num_trades", 0) or 0
     win_rate = row.get("win_rate", 0) or 0
     if num_trades > 0 and win_rate == 100.0:
-        return float("inf")
+        return 999999.0
     return 0.0
 
 

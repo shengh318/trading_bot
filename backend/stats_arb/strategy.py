@@ -186,6 +186,10 @@ class TradingStrategy:
         self.market_beta = market_beta
         self.structural_break_detected = structural_break_detected
 
+        self._current_hurst_mult: float = 1.0
+        self._current_size_mult: float = 1.0
+        self._current_max_hold_mult: float = 1.0
+
     def execute(self) -> tuple[pd.Series, list[TradeRecord]]:
         """Run the strategy and return (equity_curve, trades)."""
         spread = self.prices[self.cols[0]] - self.hedge_ratio * self.prices[self.cols[1]]
@@ -205,6 +209,24 @@ class TradingStrategy:
         a_shares = 0.0
         b_shares = 0.0
 
+        # ── Rolling Hurst (regime-aware trending adaptation) ──
+        spread_vals = spread.values
+        rolling_hurst = np.full(len(spread_vals), np.nan)
+        hurst_window = 63
+        for j in range(hurst_window, len(spread_vals)):
+            chunk = spread_vals[j - hurst_window:j]
+            chunk = chunk[pd.notna(chunk)]
+            if len(chunk) >= 30:
+                rolling_hurst[j] = self._hurst_exponent(chunk)
+
+        vol_20 = spread.rolling(20).std().values
+        vol_60 = spread.rolling(60).std().replace(0, np.nan).values
+        vr_arr = np.full(len(spread_vals), 1.0)
+        for j in range(len(spread_vals)):
+            v20 = vol_20[j] if not np.isnan(vol_20[j]) else 0.0
+            v60 = vol_60[j] if not np.isnan(vol_60[j]) else 0.0
+            vr_arr[j] = v20 / v60 if v60 > 0 else 1.0
+
         capital_per_leg = self.initial_capital / 2.0
 
         equity_curve: list[float] = [self.initial_capital]
@@ -222,6 +244,29 @@ class TradingStrategy:
             b_price = float(prices_arr[i, 1])
             scale = float(vol_arr[i])
 
+            # ── Regime-aware multipliers ──
+            hurst = float(rolling_hurst[i]) if i < len(rolling_hurst) and not np.isnan(rolling_hurst[i]) else 0.5
+            if hurst > 0.70:
+                self._current_hurst_mult = 1.5
+                self._current_size_mult = 0.3
+                self._current_max_hold_mult = 0.3
+            elif hurst > 0.55:
+                self._current_hurst_mult = 1.25
+                self._current_size_mult = 0.6
+                self._current_max_hold_mult = 0.5
+            elif hurst > 0.40:
+                self._current_hurst_mult = 1.0
+                self._current_size_mult = 0.8
+                self._current_max_hold_mult = 1.0
+            else:
+                self._current_hurst_mult = 1.0
+                self._current_size_mult = 1.0
+                self._current_max_hold_mult = 1.0
+
+            # ── Variance ratio gate (signal suppressed) ──
+            vr = float(vr_arr[i]) if i < len(vr_arr) and not np.isnan(vr_arr[i]) else 1.0
+            signal_suppressed = vr > 2.0
+
             should_exit = self._check_exit(position, z, trade_days)
 
             if should_exit and position != PositionSide.FLAT:
@@ -233,7 +278,7 @@ class TradingStrategy:
                         structural_break_exit=structural_break_exit,
                     )
                 )
-            elif position == PositionSide.FLAT:
+            elif position == PositionSide.FLAT and not signal_suppressed:
                 entry = self._check_entry(
                     i, z, a_price, b_price, cash, capital_per_leg, scale,
                 )
@@ -266,13 +311,15 @@ class TradingStrategy:
             return False
         if self.structural_break_detected:
             return True
-        if position == PositionSide.LONG_SPREAD and z >= self.z_exit:
+        effective_z_exit = self.z_exit + max(0.0, (self._current_hurst_mult - 1.0) * 1.0)
+        effective_max_hold = int(self.max_holding_days * self._current_max_hold_mult)
+        if position == PositionSide.LONG_SPREAD and z >= effective_z_exit:
             return True
-        if position == PositionSide.SHORT_SPREAD and z <= self.z_exit:
+        if position == PositionSide.SHORT_SPREAD and z <= effective_z_exit:
             return True
         if abs(z) >= self.z_entry * self.stop_loss:
             return True
-        if trade_days >= self.max_holding_days:
+        if trade_days >= effective_max_hold:
             return True
         return False
 
@@ -286,16 +333,17 @@ class TradingStrategy:
         capital_per_leg: float,
         scale: float,
     ) -> Optional[tuple]:
-        if z < -self.z_entry:
+        effective_z_entry = self.z_entry * self._current_hurst_mult
+        if z < -effective_z_entry:
             direction = PositionSide.LONG_SPREAD
             pos = 1
-        elif z > self.z_entry:
+        elif z > effective_z_entry:
             direction = PositionSide.SHORT_SPREAD
             pos = -1
         else:
             return None
 
-        alloc = capital_per_leg * scale
+        alloc = capital_per_leg * scale * self._current_size_mult
         a_shares = pos * alloc / a_price
         b_shares = -a_shares * self.hedge_ratio if self.hedge_ratio != 0 else 0.0
 
@@ -348,11 +396,12 @@ class TradingStrategy:
         cash += net
 
         if current_trade is not None:
+            cap_entry = current_trade["capital_at_entry"]
+            ret_pct = (cash - cap_entry) / cap_entry * 100 if cap_entry != 0 else 0.0
             if structural_break_exit:
                 exit_reason = "structural_break"
             else:
                 exit_reason = self._get_exit_reason(position, z, trade_days)
-            ret_pct = (cash - current_trade["capital_at_entry"]) / current_trade["capital_at_entry"] * 100
             idx_date = self.prices.index[i]
             exit_date_str = str(idx_date.date()) if hasattr(idx_date, "date") else str(idx_date)
             record = TradeRecord(
@@ -368,7 +417,7 @@ class TradingStrategy:
                 shares_a=current_trade["shares_a"],
                 shares_b=current_trade["shares_b"],
                 return_pct=round(ret_pct, 2),
-                pnl=round(cash - current_trade["capital_at_entry"], 2),
+                pnl=round(cash - cap_entry, 2),
                 holding_period=trade_days,
                 exit_reason=exit_reason,
             )
@@ -387,6 +436,38 @@ class TradingStrategy:
     @staticmethod
     def _set_exit_reason_structural_break() -> str:
         return "structural_break"
+
+    @staticmethod
+    def _hurst_exponent(ts: np.ndarray) -> float:
+        if len(ts) < 10:
+            return 0.5
+        lags = np.arange(2, len(ts) // 2)
+        if len(lags) < 2:
+            return 0.5
+        tau = []
+        for lag in lags:
+            chunks = len(ts) // lag
+            if chunks < 1:
+                continue
+            rs_vals = []
+            for c in range(chunks):
+                chunk = ts[c * lag:(c + 1) * lag]
+                if len(chunk) < 2:
+                    continue
+                mean = np.mean(chunk)
+                dev = chunk - mean
+                z = np.cumsum(dev)
+                r = max(z) - min(z)
+                s = np.std(chunk, ddof=1)
+                if s == 0:
+                    continue
+                rs_vals.append(r / s)
+            if rs_vals:
+                tau.append(np.mean(rs_vals))
+        if len(tau) < 2:
+            return 0.5
+        reg = np.polyfit(np.log(lags[:len(tau)]), np.log(tau), 1)
+        return float(np.clip(reg[0], 0.0, 1.0))
 
     @staticmethod
     def _compute_borrow_cost(
